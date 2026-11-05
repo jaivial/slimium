@@ -1,0 +1,4 @@
++ make -s -C ..
++ make -s -B -C . all
++ for c in balanced max hs-balanced cu+balanced
++ ./bench.sh smoke balanced

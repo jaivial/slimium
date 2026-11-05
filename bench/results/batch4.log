@@ -9,3 +9,12 @@
 {"config":"cu+balanced","fidelity":"pass","pages":{"text":0.0,"images":0.0,"canvas":0.0,"canvas-clip":0.0,"svg":0.0,"css":0.0,"webgl":0.0,"long-full":0.0,"wikipedia":0.0}}
 + for c in balanced hs-balanced cu+balanced max hs-max cu-hs+balanced
 + ./fidelity.sh max
+{"config":"max","fidelity":"pass","pages":{"text":0.0,"images":0.0,"canvas":0.0,"canvas-clip":0.0,"svg":0.0,"css":0.0,"webgl":0.0,"long-full":0.0,"wikipedia":0.0}}
++ for c in balanced hs-balanced cu+balanced max hs-max cu-hs+balanced
++ ./fidelity.sh hs-max
+{"config":"hs-max","fidelity":"pass","pages":{"text":0.596,"images":0.0,"canvas":0.0,"canvas-clip":0.0,"svg":0.0,"css":0.0,"webgl":0.0,"long-full":0.0,"wikipedia":0.0}}
++ for c in balanced hs-balanced cu+balanced max hs-max cu-hs+balanced
++ ./fidelity.sh cu-hs+balanced
+{"config":"cu-hs+balanced","fidelity":"pass","pages":{"text":0.596,"images":0.0,"canvas":0.0,"canvas-clip":0.0,"svg":0.0,"css":0.0,"webgl":0.0,"long-full":0.0,"wikipedia":0.0}}
++ for c in stock hs-stock hs-max cu-hs+balanced cu
++ ./bench.sh smoke stock

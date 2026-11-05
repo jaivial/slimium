@@ -212,8 +212,16 @@ cmd_smoke() {
   sleep 4
   local npages; npages=$(page_ws | wc -l)
   [ "$npages" -ge 56 ] || fails+="tabs50($npages) "
-  local last; last=$(page_ws | tail -1)
-  [ "$(eval_ws "$last" '1+1')" = 2 ] || fails+="eval50 "
+  # Regression check: with many tabs open, the OLDER (background, hidden) tabs must
+  # still answer Runtime.evaluate (--enable-low-end-device-mode froze them).
+  local w8 bad=0
+  for w8 in $(page_ws | tail -8); do
+    if [ "$(eval_ws "$w8" '1+1')" != 2 ]; then
+      bad=$((bad+1))
+      echo "background eval failed on $w8: $("$BIN/slim-cdp" -t 10 "$w8" 'Runtime.evaluate {"expression":"location.href","returnByValue":true}' 2>&1 | head -c 200)" >&2
+    fi
+  done
+  [ $bad = 0 ] || fails+="eval50-background($bad/8) "
   local m50; m50=$("$BIN/slim-memstat" --json --crashpad $BPID)
   # 9. still alive
   curl -s --max-time 2 "http://127.0.0.1:$PORT/json/version" >/dev/null || fails+="browser-died "
