@@ -1,0 +1,4 @@
+# chrome-headless-shell 1248 (Chromium 156), minimal flags
+@engine /home/jaime/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell
+--headless
+--no-first-run

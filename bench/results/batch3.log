@@ -1,0 +1,161 @@
++ T=batch3
++ TAG=batch3
++ ./bench.sh ab stock balanced A 3
+stock A#1: iso 910 MB anon 606 pss 754 procs 21 tabs 7 load 8s
+balanced A#1: iso 652 MB anon 389 pss 467 procs 9 tabs 7 load 3s
+stock A#2: iso 908 MB anon 606 pss 754 procs 21 tabs 7 load 8s
+balanced A#2: iso 696 MB anon 433 pss 513 procs 9 tabs 7 load 3s
+stock A#3: iso 907 MB anon 611 pss 752 procs 21 tabs 7 load 6s
+balanced A#3: iso 648 MB anon 387 pss 468 procs 9 tabs 7 load 2s
++ TAG=batch3
++ ./bench.sh ab stock hs-balanced A 3
+stock A#1: iso 867 MB anon 572 pss 713 procs 21 tabs 7 load 7s
+hs-balanced A#1: iso 475 MB anon 326 pss 464 procs 6 tabs 7 load 2s
+stock A#2: iso 915 MB anon 621 pss 762 procs 22 tabs 7 load 1s
+hs-balanced A#2: iso 477 MB anon 328 pss 466 procs 6 tabs 7 load 3s
+stock A#3: iso 920 MB anon 617 pss 795 procs 22 tabs 7 load 1s
+hs-balanced A#3: iso 475 MB anon 327 pss 464 procs 6 tabs 7 load 3s
++ TAG=batch3
++ ./bench.sh run hs-stock A 3
+hs-stock A#1: iso 637 MB anon 478 pss 627 procs 13 tabs 7 load 2s
+hs-stock A#2: iso 636 MB anon 478 pss 626 procs 13 tabs 7 load 2s
+hs-stock A#3: iso 637 MB anon 478 pss 626 procs 13 tabs 7 load 2s
++ TAG=batch3
++ ./bench.sh ab cu cu+balanced A 3
+cu A#1: iso 820 MB anon 541 pss 653 procs 13 tabs 7 load 2s
+cu+balanced A#1: iso 698 MB anon 435 pss 498 procs 9 tabs 7 load 3s
+cu A#2: iso 813 MB anon 532 pss 646 procs 13 tabs 7 load 3s
+cu+balanced A#2: iso 656 MB anon 393 pss 473 procs 9 tabs 7 load 3s
+cu A#3: iso 854 MB anon 575 pss 685 procs 13 tabs 7 load 2s
+cu+balanced A#3: iso 653 MB anon 390 pss 471 procs 9 tabs 7 load 3s
++ TAG=batch3
++ ./bench.sh run configs/explore/cu-nodgpu+balanced A 3
+cu-nodgpu+balanced A#1: iso 654 MB anon 390 pss 497 procs 11 tabs 7 load 3s
+cu-nodgpu+balanced A#2: iso 657 MB anon 394 pss 498 procs 9 tabs 7 load 3s
+cu-nodgpu+balanced A#3: iso 653 MB anon 390 pss 495 procs 9 tabs 7 load 3s
++ TAG=batch3
++ ./bench.sh run max A 3
+max A#1: iso 696 MB anon 433 pss 537 procs 9 tabs 7 load 3s
+max A#2: iso 650 MB anon 388 pss 492 procs 9 tabs 7 load 3s
+max A#3: iso 644 MB anon 380 pss 488 procs 9 tabs 7 load 8s
++ TAG=batch3
++ ./bench.sh run configs/explore/p1+ipgpu A 2
+p1+ipgpu A#1: iso 732 MB anon 436 pss 518 procs 8 tabs 7 load 3s
+p1+ipgpu A#2: iso 686 MB anon 391 pss 472 procs 8 tabs 7 load 3s
++ TAG=batch3
++ ./bench.sh run configs/explore/p1+dgpu A 2
+p1+dgpu A#1: iso 650 MB anon 388 pss 463 procs 9 tabs 7 load 1s
+p1+dgpu A#2: iso 652 MB anon 388 pss 465 procs 9 tabs 7 load 2s
++ ./governor.sh balanced A
+base: pss 465 MB uss 354 MB procs 9
+gc: pss 454 MB uss 343 MB procs 9
+pressure: pss 450 MB uss 339 MB procs 9
+freeze: pss 454 MB uss 340 MB procs 9
+minimize: pss 454 MB uss 339 MB procs 9
+min+press: pss 473 MB uss 335 MB procs 9
+later: pss 473 MB uss 334 MB procs 9
+{"config":"balanced","workload":"A","date":"2026-11-05T20:09:09Z","resume_ok":"7/7","steps":[{"step":"base","pss_kb":476827,"uss_kb":363140,"procs":9},{"step":"gc","pss_kb":465107,"uss_kb":351440,"procs":9},{"step":"pressure","pss_kb":461097,"uss_kb":348148,"procs":9},{"step":"freeze","pss_kb":465264,"uss_kb":348232,"procs":9},{"step":"minimize","pss_kb":465040,"uss_kb":348020,"procs":9},{"step":"min+press","pss_kb":484894,"uss_kb":343152,"procs":9},{"step":"later","pss_kb":484486,"uss_kb":342752,"procs":9}]}
++ for c in balanced hs-balanced cu+balanced max
++ ./fidelity.sh balanced
+./fidelity.sh: line 27: fx: command not found
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 27: fx: command not found
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+{"config":"balanced","fidelity":"text(100%) images(100%) canvas(100%) canvas-clip(100%) svg(100%) css(100%) webgl(100%) long-full(100%) wikipedia(100%)","pages":{"text":100,"images":100,"canvas":100,"canvas-clip":100,"svg":100,"css":100,"webgl":100,"long-full":100,"wikipedia":100}}
++ for c in balanced hs-balanced cu+balanced max
++ ./fidelity.sh hs-balanced
+./fidelity.sh: line 27: fx: command not found
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 27: fx: command not found
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+{"config":"hs-balanced","fidelity":"text(100%) images(100%) canvas(100%) canvas-clip(100%) svg(100%) css(100%) webgl(100%) long-full(100%) wikipedia(100%)","pages":{"text":100,"images":100,"canvas":100,"canvas-clip":100,"svg":100,"css":100,"webgl":100,"long-full":100,"wikipedia":100}}
++ for c in balanced hs-balanced cu+balanced max
++ ./fidelity.sh cu+balanced
+./fidelity.sh: line 27: fx: command not found
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 27: fx: command not found
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+{"config":"cu+balanced","fidelity":"text(100%) images(100%) canvas(100%) canvas-clip(100%) svg(100%) css(100%) webgl(100%) long-full(100%) wikipedia(100%)","pages":{"text":100,"images":100,"canvas":100,"canvas-clip":100,"svg":100,"css":100,"webgl":100,"long-full":100,"wikipedia":100}}
++ for c in balanced hs-balanced cu+balanced max
++ ./fidelity.sh max
+./fidelity.sh: line 27: fx: command not found
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 27: fx: command not found
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+./fidelity.sh: line 35: B: unbound variable
+{"config":"max","fidelity":"text(100%) images(100%) canvas(100%) canvas-clip(100%) svg(100%) css(100%) webgl(100%) long-full(100%) wikipedia(100%)","pages":{"text":100,"images":100,"canvas":100,"canvas-clip":100,"svg":100,"css":100,"webgl":100,"long-full":100,"wikipedia":100}}
++ for c in balanced max cu+balanced hs-balanced
++ ./bench.sh smoke balanced
+{"config":"balanced","engine":"/usr/lib64/chromium-browser/chromium-browser","date":"2026-11-05T20:09:39Z","smoke":"pass","shot_b64":44660,"tabs56":{"procs":10,"pss_kb":1070728,"rss_kb":1718620,"uss_kb":909948,"anon_kb":934900,"shmem_kb":20369,"file_kb":115451,"file_union_kb":266712,"iso_kb":1221981,"swap_kb":0}}
++ for c in balanced max cu+balanced hs-balanced
++ ./bench.sh smoke max
+{"config":"max","engine":"/usr/lib64/chromium-browser/chromium-browser","date":"2026-11-05T20:10:04Z","smoke":"pass","shot_b64":44660,"tabs56":{"procs":10,"pss_kb":1128937,"rss_kb":1776376,"uss_kb":968964,"anon_kb":990276,"shmem_kb":21089,"file_kb":117565,"file_union_kb":265512,"iso_kb":1276877,"swap_kb":0}}
++ for c in balanced max cu+balanced hs-balanced
++ ./bench.sh smoke cu+balanced
+{"config":"cu+balanced","engine":"/usr/lib64/chromium-browser/chromium-browser","date":"2026-11-05T20:10:28Z","smoke":"pass","shot_b64":44660,"tabs56":{"procs":10,"pss_kb":1070403,"rss_kb":1711988,"uss_kb":910400,"anon_kb":930193,"shmem_kb":21293,"file_kb":118909,"file_union_kb":266472,"iso_kb":1217958,"swap_kb":0}}
++ for c in balanced max cu+balanced hs-balanced
++ ./bench.sh smoke hs-balanced
+{"config":"hs-balanced","engine":"/home/jaime/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell","date":"2026-11-05T20:10:51Z","smoke":"pass","shot_b64":53964,"tabs56":{"procs":7,"pss_kb":1351862,"rss_kb":1852492,"uss_kb":1032700,"anon_kb":971402,"shmem_kb":254848,"file_kb":125609,"file_union_kb":136616,"iso_kb":1362866,"swap_kb":0}}

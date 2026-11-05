@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Bench JS perf</title></head><body><script>
+// Small CPU benchmark: numeric loop, object churn, string building, sort.
+function run() {
+  var t0 = performance.now(), s = 0;
+  for (var i = 0; i < 3e7; i++) s = (s + i * 31) % 1000003;
+  var a = []; for (var j = 0; j < 3e5; j++) a.push({k: (j * 7919) % 100003, v: 'x' + j});
+  a.sort(function (p, q) { return p.k - q.k; });
+  var str = ''; for (var k = 0; k < 2e5; k++) str += String.fromCharCode(65 + k % 26);
+  return Math.round(performance.now() - t0) + 'ms/' + (s + a[5].k + str.length);
+}
+</script></body></html>

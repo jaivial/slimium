@@ -4,42 +4,63 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Measured on Chromium 156 (Fedora ELF and Chrome-for-Testing headless shell);
+ * see docs/PROFILE.md for each switch's saving and docs/BENCHMARKS.md for the
+ * runs. No GPU switch on purpose: the SwiftShader GPU process is cheaper than
+ * --disable-gpu / --in-process-gpu here and keeps WebGL and stock-identical
+ * screenshots. No --single-process (breaks Target.createBrowserContext), no
+ * --no-zygote/--no-sandbox (costs memory: renderers lose the zygote's COW base),
+ * no --enable-low-end-device-mode (freezes background tabs: Runtime.evaluate in
+ * an older tab hangs once many tabs are open). */
+#define SLIM_SWITCHES \
+    "--renderer-process-limit=1", \
+    "--disable-site-isolation-trials", \
+    "--disable-component-extensions-with-background-pages", \
+    "--disable-extensions", \
+    "--disable-background-networking", \
+    "--disable-component-update", \
+    "--disable-default-apps", \
+    "--disable-sync", \
+    "--disable-breakpad", \
+    "--no-first-run"
+
+/* Features nobody driving a browser over DevTools needs; the WebUI omnibox
+ * popups are preloaded renderers in headless=new 156. */
+#define SLIM_DISABLE \
+    "IsolateOrigins,site-per-process,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup," \
+    "Translate,OptimizationHints,OptimizationGuideModelDownloading,OptimizationHintsFetching," \
+    "OptimizationTargetPrediction,MediaRouter,DialMediaRouteProvider,AutofillServerCommunication," \
+    "CertificateTransparencyComponentUpdater,InterestFeedContentSuggestions,CalculateNativeWinOcclusion," \
+    "HeavyAdIntervention,LensOverlay,BackForwardCache,SpareRendererForSitePerProcess"
+
+/* Network service as a browser thread; PartitionAlloc packing/reclaim knobs
+ * (no security cost). */
+#define SLIM_ENABLE \
+    "NetworkServiceInProcess2,PartitionAllocMemoryReclaimer,PartitionAllocUseDenserDistribution," \
+    "PartitionAllocSortActiveSlotSpans,PartitionAllocStraightenLargerSlotSpanFreeLists," \
+    "PartitionAllocSortSmallerSlotSpanFreeLists,MemoryPurgeInBackground,MemoryPurgeOnFreeze"
+
+/* V8 lite mode (no optimizing JIT, lazy feedback): the largest content saving
+ * once the process model is collapsed (~-100 MB iso on workload A); CPU-bound
+ * JS runs ~2.5-4x slower (bench/www/jsperf.html), page loads are unchanged. */
+#define SLIM_JS "--js-flags=--max-semi-space-size=1 --lite-mode"
+
 static const char *const balanced[] = {
-    "--renderer-process-limit=1",
-    "--process-per-site",
-    "--disable-site-isolation-trials",
-    "--disable-features=IsolateOrigins,site-per-process,Translate,OptimizationHints,MediaRouter,"
-    "BackForwardCache,InterestFeedContentSuggestions,CalculateNativeWinOcclusion,AutofillServerCommunication",
-    "--enable-low-end-device-mode",
-    "--disable-gpu",
-    "--disable-extensions",
-    "--disable-component-extensions-with-background-pages",
-    "--disable-background-networking",
-    "--disable-default-apps",
-    "--disable-sync",
-    "--no-first-run",
-    "--disable-breakpad",
-    "--js-flags=--max-lazy",
+    SLIM_SWITCHES,
+    "--disable-features=" SLIM_DISABLE,
+    "--enable-features=" SLIM_ENABLE,
+    SLIM_JS,
     NULL};
 
+/* max = balanced + PartitionAlloc hardening off (BackupRefPtr, the scheduler
+ * loop quarantine and GWP-ASan protect against use-after-free: a security cost). */
 static const char *const max_[] = {
-    "--renderer-process-limit=1",
-    "--process-per-site",
-    "--disable-site-isolation-trials",
-    "--disable-features=IsolateOrigins,site-per-process,Translate,OptimizationHints,MediaRouter,"
-    "BackForwardCache,InterestFeedContentSuggestions,CalculateNativeWinOcclusion,AutofillServerCommunication",
-    "--enable-features=NetworkServiceInProcess2",
-    "--in-process-gpu",
-    "--enable-low-end-device-mode",
-    "--disable-gpu",
-    "--disable-extensions",
-    "--disable-component-extensions-with-background-pages",
-    "--disable-background-networking",
-    "--disable-default-apps",
-    "--disable-sync",
-    "--no-first-run",
-    "--disable-breakpad",
-    "--js-flags=--max-lazy --optimize-for-size",
+    SLIM_SWITCHES,
+    "--disable-features=" SLIM_DISABLE ",PartitionAllocBackupRefPtr,PartitionAllocSchedulerLoopQuarantine,"
+    "PartitionAllocLargeThreadCacheSize,PartitionAllocEventuallyZeroFreedMemory,GwpAsanMalloc,"
+    "GwpAsanPartitionAlloc,PartitionAllocLargeEmptySlotSpanRing,PartitionAllocAdjustSizeWhenInForeground",
+    "--enable-features=" SLIM_ENABLE,
+    SLIM_JS,
     NULL};
 
 int slim_profile_parse(const char *s) {

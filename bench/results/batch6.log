@@ -1,0 +1,31 @@
++ for c in balanced max hs-balanced cu+balanced cu-hs+balanced
++ ./bench.sh smoke balanced
+{"config":"balanced","engine":"/usr/lib64/chromium-browser/chromium-browser","date":"2026-11-05T20:40:52Z","smoke":"pass","shot_b64":44660,"tabs56":{"procs":10,"pss_kb":1163337,"rss_kb":1820948,"uss_kb":1000964,"anon_kb":1022352,"shmem_kb":22169,"file_kb":118808,"file_union_kb":271500,"iso_kb":1316021,"swap_kb":0}}
++ for c in balanced max hs-balanced cu+balanced cu-hs+balanced
++ ./bench.sh smoke max
+{"config":"max","engine":"/usr/lib64/chromium-browser/chromium-browser","date":"2026-11-05T20:41:16Z","smoke":"pass","shot_b64":44660,"tabs56":{"procs":10,"pss_kb":1034829,"rss_kb":1676252,"uss_kb":878828,"anon_kb":900732,"shmem_kb":21421,"file_kb":112666,"file_union_kb":262128,"iso_kb":1184281,"swap_kb":0}}
++ for c in balanced max hs-balanced cu+balanced cu-hs+balanced
++ ./bench.sh smoke hs-balanced
+{"config":"hs-balanced","engine":"/home/jaime/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell","date":"2026-11-05T20:41:40Z","smoke":"pass","shot_b64":53964,"tabs56":{"procs":7,"pss_kb":1468645,"rss_kb":1986768,"uss_kb":1130040,"anon_kb":1060765,"shmem_kb":277888,"file_kb":129989,"file_union_kb":140636,"iso_kb":1479289,"swap_kb":0}}
++ for c in balanced max hs-balanced cu+balanced cu-hs+balanced
++ ./bench.sh smoke cu+balanced
+{"config":"cu+balanced","engine":"/usr/lib64/chromium-browser/chromium-browser","date":"2026-11-05T20:42:03Z","smoke":"pass","shot_b64":44660,"tabs56":{"procs":10,"pss_kb":1167817,"rss_kb":1822684,"uss_kb":1006248,"anon_kb":1025637,"shmem_kb":24229,"file_kb":117945,"file_union_kb":269692,"iso_kb":1319558,"swap_kb":0}}
++ for c in balanced max hs-balanced cu+balanced cu-hs+balanced
++ ./bench.sh smoke cu-hs+balanced
+{"config":"cu-hs+balanced","engine":"/home/jaime/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell","date":"2026-11-05T20:42:27Z","smoke":"pass","shot_b64":53964,"tabs56":{"procs":7,"pss_kb":1467522,"rss_kb":1999436,"uss_kb":1118052,"anon_kb":1059953,"shmem_kb":277888,"file_kb":129677,"file_union_kb":140136,"iso_kb":1477977,"swap_kb":0}}
++ T=batch6
++ TAG=batch6
++ ./bench.sh ab stock balanced A 3
+stock A#1: iso 912 MB anon 613 pss 780 procs 21 tabs 7 load 6s
+balanced A#1: iso 775 MB anon 510 pss 613 procs 9 tabs 7 load 2s
+stock A#2: iso 920 MB anon 622 pss 790 procs 22 tabs 7 load 1s
+balanced A#2: iso 775 MB anon 507 pss 615 procs 9 tabs 7 load 2s
+stock A#3: iso 906 MB anon 619 pss 782 procs 22 tabs 7 load 3s
+balanced A#3: iso 766 MB anon 496 pss 602 procs 9 tabs 7 load 3s
++ TAG=batch6
++ ./bench.sh ab stock max A 3
+stock A#1: iso 889 MB anon 589 pss 759 procs 22 tabs 7 load 2s
+max A#1: iso 683 MB anon 423 pss 524 procs 9 tabs 7 load 2s
+stock A#2: iso 906 MB anon 618 pss 776 procs 22 tabs 7 load 0s
+max A#2: iso 635 MB anon 376 pss 476 procs 11 tabs 7 load 3s
+Terminated                 sleep "$SETTLE"

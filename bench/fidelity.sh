@@ -24,7 +24,7 @@ fx_shot() { case $1 in canvas-clip) echo '{"format":"png","clip":{"x":20,"y":20,
 
 capture() {   # $1 config, $2 out dir
   mkdir -p "$2"; launch "$1" || return 1
-  local B; B=$(browser_ws) fx out
+  local B fx out; B=$(browser_ws)
   for fx in $FX; do
     out=$("$BIN/slim-cdp" -m 0 -t 40 "$B" 'Target.createTarget {"url":"about:blank"}' \
       'Target.attachToTarget {"targetId":"$targetId","flatten":true}' \
