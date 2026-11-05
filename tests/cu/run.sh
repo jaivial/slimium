@@ -252,7 +252,10 @@ echo "# browser tree now: pss=$(( ${mem%% *} / 1024 )) MB, procs=${mem##* }"
 if [ -n "${CU_BENCH:-}" ] && [ -f "$HOME/cu-wt/slimium/bench/parallel_tabs.py" ]; then
   r=$(cd "$HOME/cu-wt/slimium" && CU_BROWSER=$BROWSER timeout 300 python3 bench/parallel_tabs.py --bin "$HOME/.local/bin/cu-slim-bin" --levels 5,20 --waves 1 2>&1 | tail -15)
   echo "$r" | sed 's/^/# bench: /'
-  expect cu.bench.parallel_tabs 'ok|pass|[0-9]+/[0-9]+' "$r"
+  # Informational only: in cu 1.9.0 this bench sends "tab" in the JSON body,
+  # which the daemon ignores, so its flows share one tab and most answer 502
+  # on stock Chromium too (5: 3 ok/2 errors, 20: 6/14, both browsers alike).
+  known_ cu.bench.parallel_tabs '"errors": 0' "$r"
 fi
 
 stop_instance T

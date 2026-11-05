@@ -97,7 +97,7 @@ tests/cu/run.sh                     # 71 checks, ~60 s
 PARALLEL=50 tests/cu/run.sh         # more parallel agents
 CU_SLIM_TEST_BROWSER=/usr/lib64/chromium-browser/chromium-browser tests/cu/run.sh   # any browser
 SLIMIUM_CHROME=~/slimium-wt/core/slimium-chrome tests/cu/run.sh                     # a wrapper build
-CU_BENCH=1 tests/cu/run.sh          # also cu's own bench/parallel_tabs.py on that browser
+CU_BENCH=1 tests/cu/run.sh          # also cu's own bench/parallel_tabs.py (informational, see below)
 ```
 
 It starts its own cu-slim daemon (temp data dir, HTTP 8792, CDP 9392), serves
@@ -137,7 +137,11 @@ Two checks are reported as **KNOWN** (cu issues, identical on stock Chromium,
 not counted as failures): `cu text` stops at 16 000 characters but answers
 `"truncated":false`; a click that starts a download does not answer
 `"download":"name"` (cu waits for `Page.downloadWillBegin`, which Chromium 156
-does not send there) although the file is downloaded and listed. Also seen: an
+does not send there) although the file is downloaded and listed. cu's own `bench/parallel_tabs.py` is stale against
+cu 1.9.0 (it passes `"tab"` in the JSON body, which the daemon ignores, so its
+flows share one tab): 5 flows → 3 ok / 2 × 502, 20 → 6 / 14, the same on the
+stand-in and on stock Chromium. cu's `cargo test` uses a fake Chromium and
+cannot target a real browser. Also seen: an
 element shot (`--selector`) on a 400-paragraph page takes 3-6 s on any
 Chromium and can hit cu's 5 s DevTools timeout ("os error 11").
 
