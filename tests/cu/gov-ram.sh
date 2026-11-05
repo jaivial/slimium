@@ -40,13 +40,17 @@ print("%.1f %.1f %.1f %.1f" % (v[0]/1024, med/1024, v[-1]/1024, tw/1024))'; }
 
 one_run() { # one_run CONFIG RUN
   local cfg=$1 run=$2 B port cdp url err tab okc=0 shots=0 fx t0 i
+  local mode=fast hib=0
   case $cfg in
     slim) B=$(slim_browser) port=8790 cdp=9390 ;;
+    slim-hib) B=$(slim_browser) port=8790 cdp=9390 hib=3 ;;   # + opt-in hibernation, K=3, untouched >= 20 s
     stock) B=$ELF port=8791 cdp=9391 ;;
+    stock-compat) B=$ELF port=8791 cdp=9391 mode=compat ;;   # cu passes only 3 flags: plain Chromium
     *) echo "unknown config $cfg" >&2; return 1 ;;
   esac
   H=$(mktemp -d /tmp/cu-gov-ram.XXXXXX)
-  export CU_SLIM_HOME=$H CU_SLIM_MODE=fast SLIM_PROFILE=${SLIM_PROFILE:-balanced} SLIM_GOV_LOG=$H/gov.log
+  export CU_SLIM_HOME=$H CU_SLIM_MODE=$mode SLIM_PROFILE=${SLIM_PROFILE:-balanced} SLIM_GOV_LOG=$H/gov.log
+  export SLIM_GOV_HIBERNATE=$hib SLIM_GOV_HIBERNATE_MIN_S=20
   start_instance R "$H" "$port" "$cdp" "$B" >&2 || return 1
   local P=$INST_BROWSER_R tabs=()
   local urls=()
@@ -70,8 +74,9 @@ one_run() { # one_run CONFIG RUN
   done
   # active pass, sampled every second in the background
   ( while :; do echo "$(date +%s.%N) $(iso "$P")"; sleep 1; done ) >"$H/active" & SP=$!
+  local asnap=0
   for tab in "${tabs[@]}"; do
-    "$CU_SLIM" snapshot --tab "$tab" >/dev/null 2>&1
+    case $("$CU_SLIM" snapshot --tab "$tab" 2>/dev/null) in *'ref=e'*|*heading*) asnap=$((asnap+1)) ;; esac
     "$CU_SLIM" shot "$H/s-$tab.png" --tab "$tab" >/dev/null 2>&1 && [ -s "$H/s-$tab.png" ] && shots=$((shots+1))
   done
   "$CU_SLIM" --new-tab navigate "$BASE/long.html" >/dev/null 2>&1
@@ -81,16 +86,17 @@ one_run() { # one_run CONFIG RUN
   local st ac gcpu=- npass=- nrec=-
   st=$(stats <"$H/steady")
   ac=$(awk '{print $1, $2}' "$H/active" | stats | awk '{print $3}')
-  if [ "$cfg" = slim ]; then
+  if [ "$cfg" != stock ] && [ "$cfg" != stock-compat ]; then
     local G; G=$(pgrep -f "^slimium gov --daemon --pid $P ")
     [ -n "$G" ] && gcpu=$(ps -o time= -p "$G" | tr -d ' ')
     npass=$(grep -c '"ev":"pass".*"gc":1' "$H/gov.log" 2>/dev/null) nrec=$(grep -c '"ev":"pass".*"reclaim":[12]' "$H/gov.log" 2>/dev/null)
+    nrec="$nrec hibernated $(grep -c '"ev":"hibernate"' "$H/gov.log") restored $(grep -c '"ev":"restore"' "$H/gov.log")"
     cp "$H/gov.log" "${OUT%.txt}-$cfg-$run.gov.log" 2>/dev/null
   fi
   cp "$H/steady" "${OUT%.txt}-$cfg-$run.steady" 2>/dev/null
-  printf '%s %s settled_mb %.1f (anon+shmem %.1f file_union %.1f procs %s) steady_min/med/max/twmean %s active_peak %s after30 %.1f snapshots %d/%d shots %d gc_passes %s reclaims %s gov_cpu %s\n' \
+  printf '%s %s settled_mb %.1f (anon+shmem %.1f file_union %.1f procs %s) steady_min/med/max/twmean %s active_peak %s after30 %.1f snapshots %d/%d active_snapshots %d shots %d gc_passes %s reclaims %s gov_cpu %s\n' \
     "$cfg" "$run" "$(echo "${settled%% *} / 1024" | bc -l)" "$(echo "$settled" | awk '{print $2/1024}')" "$(echo "$settled" | awk '{print $3/1024}')" \
-    "$(echo "$settled" | awk '{print $4}')" "$st" "$ac" "$(echo "${after%% *} / 1024" | bc -l)" "$okc" "${#urls[@]}" "$shots" "$npass" "$nrec" "$gcpu"
+    "$(echo "$settled" | awk '{print $4}')" "$st" "$ac" "$(echo "${after%% *} / 1024" | bc -l)" "$okc" "${#urls[@]}" "$asnap" "$shots" "$npass" "$nrec" "$gcpu"
   stop_instance R
   rm -rf "${H:?}"; H=
 }
