@@ -1,0 +1,5 @@
+/build/
+/slimium
+/slimium-chrome
+*.o
+/bench/results/*.tmp
