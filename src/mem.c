@@ -142,16 +142,16 @@ static long scan_files(pid_t pid, funion *u) {
             while (*e == ' ') e++;
             if (ino && *e == '/' && end > start && !is_shmem(u, maj << 32 | min, e)) {
                 fmap *m = file_of(u, maj << 32 | min, ino);
-                uint64_t ent[512];
+                uint64_t pm[512];
                 unsigned long long first = start / (unsigned long long)psz, npg = (end - start) / (unsigned long long)psz;
                 for (unsigned long long i = 0; m && i < npg;) {
                     size_t want = npg - i < 512 ? (size_t)(npg - i) : 512;
-                    ssize_t got = pread(pfd, ent, want * 8, (off_t)((first + i) * 8));
+                    ssize_t got = pread(pfd, pm, want * 8, (off_t)((first + i) * 8));
                     if (got <= 0) break;
                     size_t k = (size_t)got / 8;
                     for (size_t j = 0; j < k; j++)
                         /* bit 63 present, bit 61 file page (not a private COW copy) */
-                        if ((ent[j] >> 63 & 1) && (ent[j] >> 61 & 1)) {
+                        if ((pm[j] >> 63 & 1) && (pm[j] >> 61 & 1)) {
                             own++;
                             u->pages += mark(m, off / (unsigned long long)psz + i + j);
                         }

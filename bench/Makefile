@@ -1,6 +1,6 @@
 # bench/Makefile: memory-track tools (C11, same flags as the top-level build).
 CC      ?= gcc
-CFLAGS  ?= -std=c11 -Os -Wall -Wextra -Werror -pedantic
+CFLAGS  ?= -std=c11 -Os -Wall -Wextra -Werror -Wshadow -Wformat=2 -Wno-format-nonliteral -pedantic
 LDFLAGS ?= -s
 OUT     := ../build/bench
 SRC     := ../src
