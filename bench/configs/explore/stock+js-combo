@@ -1,0 +1,2 @@
+--no-first-run
+--js-flags=--max-lazy --optimize-for-size --max-semi-space-size=1 --single-threaded-gc

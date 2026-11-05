@@ -1,0 +1,2 @@
+--no-first-run
+--renderer-process-limit=1

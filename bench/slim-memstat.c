@@ -1,9 +1,11 @@
 /* slim-memstat: memory of a process tree.
  *   slim-memstat [--json] [-v] [--crashpad] PID...
- * Prints procs, pss, rss, uss (kB) for each PID and all its descendants, summed.
- * -v adds one line per process with its Chromium --type (and utility sub-type).
- * --crashpad also counts Chromium's crash handlers, which are reparented away
- * from the browser: the --crashpad-handler-pid=N named by a tree member, and the
+ * Prints procs and pss/rss/uss/anon/shmem/file/file_union/iso/swap (kB) for the
+ * PIDs and all their descendants, as one set (src/mem.c; iso = anon + shmem +
+ * union of resident file pages = the isolated footprint). -v adds one line per
+ * process with its Chromium --type (and utility sub-type). --crashpad also
+ * counts Chromium's crash handlers, which are reparented away from the
+ * browser: the --crashpad-handler-pid=N named by a tree member, and the
  * chrome_crashpad_handler started with it (its self-monitor). */
 #define _POSIX_C_SOURCE 200809L
 #include "../src/mem.h"
@@ -15,7 +17,6 @@
 #include <unistd.h>
 
 static int json, verbose;
-static slim_mem total;
 static pid_t crash_pid;
 
 /* NUL-separated /proc/<pid>/cmdline with NULs turned into spaces (Chromium
@@ -60,22 +61,24 @@ static void kind_of(pid_t pid, char *out, size_t cap) {
     }
 }
 
-static void each(pid_t pid, const slim_mem *m, void *ctx) {
-    (void)ctx;
-    char k[128];
-    kind_of(pid, k, sizeof k);
-    if (!verbose) return;
+static void line(const char *pre, const slim_mem *m) {
     if (json)
-        printf("{\"pid\":%d,\"type\":\"%s\",\"pss_kb\":%ld,\"rss_kb\":%ld,\"uss_kb\":%ld}\n",
-               (int)pid, k, m->pss_kb, m->rss_kb, m->uss_kb);
+        printf("{%s\"procs\":%d,\"pss_kb\":%ld,\"rss_kb\":%ld,\"uss_kb\":%ld,\"anon_kb\":%ld,\"shmem_kb\":%ld,"
+               "\"file_kb\":%ld,\"file_union_kb\":%ld,\"iso_kb\":%ld,\"swap_kb\":%ld}\n", pre, m->procs, m->pss_kb,
+               m->rss_kb, m->uss_kb, m->anon_kb, m->shmem_kb, m->file_kb, m->file_union_kb, m->iso_kb, m->swap_kb);
     else
-        printf("%8d %-48.48s pss %7ld rss %7ld uss %7ld kB\n", (int)pid, k, m->pss_kb, m->rss_kb,
-               m->uss_kb);
+        printf("%sprocs %d iso %ld pss %ld rss %ld uss %ld anon %ld shmem %ld file %ld file_union %ld swap %ld kB\n",
+               pre, m->procs, m->iso_kb, m->pss_kb, m->rss_kb, m->uss_kb, m->anon_kb, m->shmem_kb, m->file_kb,
+               m->file_union_kb, m->swap_kb);
 }
 
-static void add(const slim_mem *m) {
-    total.procs += m->procs; total.pss_kb += m->pss_kb;
-    total.rss_kb += m->rss_kb; total.uss_kb += m->uss_kb;
+static void each(pid_t pid, const slim_mem *m, void *ctx) {
+    char k[128], pre[200];
+    kind_of(pid, k, sizeof k);
+    if (!verbose || !ctx) return;
+    if (json) snprintf(pre, sizeof pre, "\"pid\":%d,\"type\":\"%s\",", (int)pid, k);
+    else snprintf(pre, sizeof pre, "%8d %-40.40s ", (int)pid, k);
+    line(pre, m);
 }
 
 /* Field 4 (ppid) and 22 (starttime) of /proc/<pid>/stat. */
@@ -98,13 +101,15 @@ static int stat_of(pid_t pid, long *ppid, long long *start) {
     return 0;
 }
 
-static void add_crashpad(void) {
-    long pp0; long long st0;
-    if (!crash_pid || stat_of(crash_pid, &pp0, &st0)) return;
+/* Crash handler pids: crash_pid and its self-monitor (same parent, started
+ * within a second, also chrome_crashpad_handler). */
+static int find_crashpad(pid_t *out, int cap) {
+    long pp0; long long st0; int n = 0;
+    if (!crash_pid || stat_of(crash_pid, &pp0, &st0)) return 0;
     DIR *d = opendir("/proc");
-    if (!d) return;
+    if (!d) return 0;
     struct dirent *de;
-    while ((de = readdir(d))) {
+    while ((de = readdir(d)) && n < cap) {
         if (de->d_name[0] < '1' || de->d_name[0] > '9') continue;
         pid_t pid = (pid_t)atoi(de->d_name);
         long pp; long long st; char buf[4096];
@@ -112,36 +117,32 @@ static void add_crashpad(void) {
             if (stat_of(pid, &pp, &st) || pp != pp0 || llabs(st - st0) > 100) continue;
             if (cmdline(pid, buf, sizeof buf) <= 0 || !strstr(buf, "chrome_crashpad_handler")) continue;
         }
-        slim_mem m;
-        if (slim_mem_proc(pid, &m)) continue;
-        each(pid, &m, NULL);
-        add(&m);
+        out[n++] = pid;
     }
     closedir(d);
+    return n;
 }
 
 int main(int argc, char **argv) {
-    int crashpad = 0, npids = 0;
+    int crashpad = 0, n = 0;
+    pid_t roots[64];
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--json")) json = 1;
         else if (!strcmp(argv[i], "-v")) verbose = 1;
         else if (!strcmp(argv[i], "--crashpad")) crashpad = 1;
-        else if (argv[i][0] >= '1' && argv[i][0] <= '9') {
-            slim_mem m;
-            if (slim_mem_tree_each((pid_t)atoi(argv[i]), each, NULL, &m) != 0) {
-                fprintf(stderr, "slim-memstat: no such process %s\n", argv[i]);
-                return 1;
-            }
-            add(&m); npids++;
-        } else { npids = 0; break; }
+        else if (argv[i][0] >= '1' && argv[i][0] <= '9' && n < 56) roots[n++] = (pid_t)atoi(argv[i]);
+        else { n = 0; break; }
     }
-    if (!npids) { fprintf(stderr, "usage: slim-memstat [--json] [-v] [--crashpad] PID...\n"); return 2; }
-    if (crashpad) add_crashpad();
-    if (json)
-        printf("{\"procs\":%d,\"pss_kb\":%ld,\"rss_kb\":%ld,\"uss_kb\":%ld}\n", total.procs,
-               total.pss_kb, total.rss_kb, total.uss_kb);
-    else
-        printf("procs %d pss %ld kB rss %ld kB uss %ld kB\n", total.procs, total.pss_kb, total.rss_kb,
-               total.uss_kb);
+    if (!n) { fprintf(stderr, "usage: slim-memstat [--json] [-v] [--crashpad] PID...\n"); return 2; }
+    slim_mem m;
+    if (crashpad) {   /* first pass only learns the crash handler pid */
+        if (slim_mem_trees(roots, n, each, NULL, &m) != 0) goto gone;
+        n += find_crashpad(roots + n, 8);
+    }
+    if (slim_mem_trees(roots, n, each, (void *)1, &m) != 0) goto gone;
+    line("", &m);
     return 0;
+gone:
+    fprintf(stderr, "slim-memstat: no such process\n");
+    return 1;
 }

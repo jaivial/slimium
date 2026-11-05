@@ -1,0 +1,8 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Fid Canvas</title></head><body style="margin:20px">
+<canvas id="c" width="600" height="400"></canvas><script>
+var x=document.getElementById('c').getContext('2d');
+var g=x.createRadialGradient(300,200,10,300,200,250);g.addColorStop(0,'#ff0');g.addColorStop(1,'#03c');x.fillStyle=g;x.fillRect(0,0,600,400);
+x.strokeStyle='#fff';x.lineWidth=6;x.beginPath();for(var i=0;i<12;i++){x.moveTo(300,200);x.lineTo(300+190*Math.cos(i*Math.PI/6),200+190*Math.sin(i*Math.PI/6));}x.stroke();
+x.fillStyle='#000';x.font='bold 36px sans-serif';x.fillText('canvas 2D',200,60);
+var im=x.getImageData(0,0,100,100);for(var p=0;p<im.data.length;p+=4){im.data[p]=255-im.data[p];}x.putImageData(im,0,0);
+</script></body></html>

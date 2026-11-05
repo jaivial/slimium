@@ -69,13 +69,33 @@ static const struct { const char *name; char sep; int opp; } lists[] = {
 };
 #define NLISTS (sizeof lists / sizeof *lists)
 
+/* Memory-relevant switches: the profile's value replaces the caller's (cu passes
+ * --renderer-process-limit=4, which would otherwise undo the process model).
+ * Every other switch the caller set wins (identity / functional switches:
+ * --user-data-dir, --remote-debugging-port, --headless, --user-agent,
+ * --window-size, --proxy-server, --lang, ...). */
+static const char *const profile_wins[] = {
+    "renderer-process-limit", "process-per-site", "process-per-tab", "single-process", "no-zygote",
+    "in-process-gpu", "disable-gpu", "disable-gpu-compositing", "disable-software-rasterizer",
+    "disable-site-isolation-trials", "enable-low-end-device-mode", "num-raster-threads",
+    "force-device-scale-factor", "disk-cache-size", "aggressive-cache-discard", NULL};
+
+/* A profile switch also removes caller switches that contradict it. */
+static const struct { const char *flag, *drops[3]; } conflicts[] = {
+    {"disable-site-isolation-trials", {"site-per-process", "isolate-origins", NULL}},
+    {"process-per-site", {"process-per-tab", NULL, NULL}},
+    {"single-process", {"process-per-tab", "process-per-site", NULL}},
+};
+
 /* A profile switch is not added when the caller passed any of these: the caller
  * asked for GPU/WebGL, which --disable-gpu / --in-process-gpu would break. */
 static const struct { const char *flag, *by[6]; } suppress[] = {
     {"disable-gpu", {"use-gl", "use-angle", "enable-unsafe-swiftshader", "enable-gpu", "ignore-gpu-blocklist", NULL}},
-    {"in-process-gpu", {"use-gl", "use-angle", "enable-unsafe-swiftshader", "enable-gpu", "disable-gpu-process-crash-limit", NULL}},
+    {"disable-gpu-compositing", {"use-gl", "use-angle", "enable-unsafe-swiftshader", "enable-gpu", NULL, NULL}},
+    {"in-process-gpu", {"use-gl", "use-angle", "enable-unsafe-swiftshader", "enable-gpu", NULL, NULL}},
     {"disable-software-rasterizer", {"use-gl", "use-angle", "enable-unsafe-swiftshader", NULL, NULL, NULL}},
 };
+#define NELEM(a) (sizeof a / sizeof *a)
 
 static int is_switch(const char *a) { return a[0] == '-' && a[1] && strcmp(a, "--"); }
 
@@ -92,11 +112,21 @@ static int sw_is(const char *a, const char *name) {
     return n == strlen(name) && !memcmp(s, name, n);
 }
 
+static int same_sw(const char *a, const char *b) {
+    size_t n, m; const char *x = sw_name(a, &n), *y = sw_name(b, &m);
+    return n == m && !memcmp(x, y, n);
+}
+
 static const char *sw_value(const char *a) { const char *e = strchr(a, '='); return e ? e + 1 : ""; }
 
 static int list_of(const char *a) {
     for (size_t i = 0; i < NLISTS; i++) if (sw_is(a, lists[i].name)) return (int)i;
     return -1;
+}
+
+static int in_set(const char *a, const char *const *set) {
+    for (; *set; set++) if (sw_is(a, *set)) return 1;
+    return 0;
 }
 
 /* Identity of a list item: feature "Name:param/v" or "Name<Trial" -> "Name";
@@ -106,7 +136,7 @@ static void item_key(const char *t, size_t n, int js, char *key, size_t cap) {
     if (js) {
         while (i < n && t[i] == '-') i++;
         if (n - i > 3 && !memcmp(t + i, "no-", 3)) i += 3;
-        else if (n - i > 2 && !memcmp(t + i, "no", 2) && t[i + 2] == '_') i += 3;
+        else if (n - i > 3 && !memcmp(t + i, "no_", 3)) i += 3;
         for (; i < n && t[i] != '=' && o + 1 < cap; i++) key[o++] = t[i] == '_' ? '-' : t[i];
     } else {
         if (i < n && t[i] == '*') i++;
@@ -148,6 +178,31 @@ static void add_items(char *dst, size_t *len, const char *src, char sep, int js,
     }
 }
 
+/* Should the profile switch f be left out given the caller's argv[0..end)? */
+static int profile_skips(const char *f, int end, char **argv) {
+    for (size_t s = 0; s < NELEM(suppress); s++)
+        if (sw_is(f, suppress[s].flag))
+            for (int j = 0; j < end; j++)
+                for (size_t b = 0; suppress[s].by[b]; b++)
+                    if (is_switch(argv[j]) && sw_is(argv[j], suppress[s].by[b])) return 1;
+    if (in_set(f, profile_wins)) return 0;
+    for (int j = 0; j < end; j++) if (is_switch(argv[j]) && same_sw(argv[j], f)) return 1;
+    return 0;
+}
+
+/* Is the caller's switch a overridden by an (emitted) profile switch? */
+static int caller_dropped(const char *a, const char *const *f, size_t nf, int end, char **argv) {
+    for (size_t i = 0; i < nf; i++) {
+        if (list_of(f[i]) >= 0 || profile_skips(f[i], end, argv)) continue;
+        if (in_set(f[i], profile_wins) && same_sw(a, f[i])) return 1;
+        for (size_t c = 0; c < NELEM(conflicts); c++)
+            if (sw_is(f[i], conflicts[c].flag))
+                for (size_t d = 0; conflicts[c].drops[d]; d++)
+                    if (sw_is(a, conflicts[c].drops[d])) return 1;
+    }
+    return 0;
+}
+
 char **slim_profile_merge_argv(int level, const char *chromium, int argc, char **argv) {
     size_t nf; const char *const *f = slim_profile_flags(level, &nf);
     /* One allocation: the pointer array, then an arena for the merged lists
@@ -164,29 +219,30 @@ char **slim_profile_merge_argv(int level, const char *chromium, int argc, char *
     int end = argc;     /* first positional index after a bare "--" */
     for (int i = 0; i < argc; i++) if (!strcmp(argv[i], "--")) { end = i; break; }
 
-    /* Merged value of every list switch: caller items first (caller wins),
-     * then profile items not set or opposed by the caller. */
-    char *merged[NLISTS]; int caller_has[NLISTS] = {0}, emitted[NLISTS] = {0};
+    /* Merged value of every list switch: the caller's items that the profile
+     * does not override (same key in the same list, or the item in the
+     * opposite list), then the profile's items. */
+    char *merged[NLISTS]; int emitted[NLISTS] = {0};
     for (size_t l = 0; l < NLISTS; l++) {
-        int js = lists[l].sep == ' ';
-        size_t len = 0; merged[l] = a; a[0] = 0;
-        size_t nl = strlen(lists[l].name);
+        int js = lists[l].sep == ' ', caller_has = 0, profile_has = 0;
+        const char *veto[16]; size_t nv = 0;
+        for (size_t i = 0; i < nf && nv + 1 < NELEM(veto); i++) {
+            int fl = list_of(f[i]);
+            if (fl == (int)l) profile_has = 1;
+            if (fl == (int)l || (lists[l].opp >= 0 && fl == lists[l].opp)) veto[nv++] = sw_value(f[i]);
+        }
+        veto[nv] = NULL;
+        size_t len = 0, nl = strlen(lists[l].name);
+        merged[l] = a;
         a[0] = a[1] = '-'; memcpy(a + 2, lists[l].name, nl); a[2 + nl] = '=';
         char *v = a + nl + 3; v[0] = 0;
         for (int i = 0; i < end; i++)
             if (is_switch(argv[i]) && list_of(argv[i]) == (int)l) {
-                caller_has[l] = 1; add_items(v, &len, sw_value(argv[i]), lists[l].sep, js, NULL);
+                caller_has = 1; add_items(v, &len, sw_value(argv[i]), lists[l].sep, js, veto);
             }
-        /* Items the caller put in the opposite list veto the profile's. */
-        const char *veto[64]; size_t nv = 0;
-        if (lists[l].opp >= 0)
-            for (int i = 0; i < end && nv + 1 < 64; i++)
-                if (is_switch(argv[i]) && list_of(argv[i]) == lists[l].opp) veto[nv++] = sw_value(argv[i]);
-        veto[nv] = NULL;
-        int profile_has = 0;
         for (size_t i = 0; i < nf; i++)
-            if (list_of(f[i]) == (int)l) { profile_has = 1; add_items(v, &len, sw_value(f[i]), lists[l].sep, js, veto); }
-        if (!caller_has[l] && (!profile_has || !len)) merged[l] = NULL;
+            if (list_of(f[i]) == (int)l) add_items(v, &len, sw_value(f[i]), lists[l].sep, js, NULL);
+        if (!len && !(caller_has && !profile_has)) merged[l] = NULL;
         a = v + len + 1;
     }
 
@@ -195,29 +251,19 @@ char **slim_profile_merge_argv(int level, const char *chromium, int argc, char *
     for (int i = 0; i < end; i++) {
         if (!is_switch(argv[i])) continue;
         int l = list_of(argv[i]);
-        if (l < 0) out[k++] = argv[i];
-        else if (!emitted[l]) { emitted[l] = 1; out[k++] = merged[l]; }
+        if (l >= 0) {
+            if (!emitted[l]) { emitted[l] = 1; if (merged[l]) out[k++] = merged[l]; }
+        } else if (!caller_dropped(argv[i], f, nf, end, argv)) out[k++] = argv[i];
     }
     for (size_t i = 0; i < nf; i++) {
         int l = list_of(f[i]);
         if (l >= 0) {
-            if (merged[l] && !emitted[l]) { emitted[l] = 1; out[k++] = merged[l]; }
-            continue;
+            if (!emitted[l]) { emitted[l] = 1; if (merged[l]) out[k++] = merged[l]; }
+        } else if (!profile_skips(f[i], end, argv)) {
+            size_t j = 0;   /* a profile list may not repeat a switch, but be safe */
+            while (j < k && !(is_switch(out[j]) && same_sw(out[j], f[i]))) j++;
+            if (j == k) out[k++] = (char *)f[i];
         }
-        size_t n; const char *name = sw_name(f[i], &n);
-        int skip = 0;
-        for (int j = 0; j < end && !skip; j++) {
-            size_t m; const char *s;
-            if (!is_switch(argv[j])) continue;
-            s = sw_name(argv[j], &m);
-            skip = m == n && !memcmp(s, name, n);
-        }
-        for (size_t s = 0; !skip && s < sizeof suppress / sizeof *suppress; s++)
-            if (sw_is(f[i], suppress[s].flag))
-                for (int j = 0; j < end && !skip; j++)
-                    for (size_t b = 0; !skip && suppress[s].by[b]; b++)
-                        skip = is_switch(argv[j]) && sw_is(argv[j], suppress[s].by[b]);
-        if (!skip) out[k++] = (char *)f[i];
     }
     /* Positional arguments (URLs, about:blank) last, in their order. */
     for (int i = 0; i < argc; i++) if (i >= end || !is_switch(argv[i])) out[k++] = argv[i];

@@ -3,3 +3,5 @@
 /slimium-chrome
 *.o
 /bench/results/*.tmp
+/bench/www/gen/
+/bench/results/fid/

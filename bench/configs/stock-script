@@ -1,0 +1,3 @@
+# Stock Chromium through the Fedora wrapper script (/etc/chromium/chromium.conf flags, cat pipes).
+@engine /usr/bin/chromium-browser
+--no-first-run

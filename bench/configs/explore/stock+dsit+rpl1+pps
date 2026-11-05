@@ -1,0 +1,4 @@
+--no-first-run
+--disable-site-isolation-trials
+--renderer-process-limit=1
+--process-per-site

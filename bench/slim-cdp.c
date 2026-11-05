@@ -5,8 +5,8 @@
  *   "S:Domain.method {params}" same, on the session in $sessionId (flat mode)
  *   "wait Domain.event"        wait for an event (any session)
  *   "sleep MS"
- * "$name" in a step is replaced by the latest "name":"value" string seen in a
- * reply (e.g. $targetId, $sessionId, $browserContextId). Replies are printed
+ * "$name" in a step is replaced by the latest "name":"value" string (or
+ * "name":number) seen in a reply (e.g. $targetId, $sessionId, $windowId). Replies are printed
  * truncated to MAXLEN bytes (default 4096, 0 = whole). Exit 1 if a command
  * answers with an error or times out. */
 #define _POSIX_C_SOURCE 200809L
@@ -115,16 +115,23 @@ static void ws_connect(const char *url) {
     if (!strstr(resp, " 101 ")) die("websocket upgrade refused");
 }
 
-/* Latest "name":"value" among kept replies. */
+/* Latest "name":"value" (string, inserted without quotes) or "name":123
+ * (number) among kept replies. */
 static const char *lookup(const char *name, size_t nl, size_t *vl) {
-    char key[128]; if (nl + 4 > sizeof key) return NULL;
-    key[0] = '"'; memcpy(key + 1, name, nl); memcpy(key + 1 + nl, "\":\"", 4); key[nl + 4] = 0;
+    char key[128]; if (nl + 3 > sizeof key) return NULL;
+    key[0] = '"'; memcpy(key + 1, name, nl); memcpy(key + 1 + nl, "\":", 3); key[nl + 3] = 0;
     for (int i = nkept - 1; i >= 0; i--) {
         const char *s = strstr(kept[i], key);
         if (!s) continue;
-        s += nl + 4; const char *e = strchr(s, '"');
-        if (!e) continue;
-        *vl = (size_t)(e - s); return s;
+        s += nl + 3;
+        if (*s == '"') {
+            const char *e = strchr(++s, '"');
+            if (!e) continue;
+            *vl = (size_t)(e - s); return s;
+        }
+        size_t n = 0; while (s[n] == '-' || s[n] == '.' || (s[n] >= '0' && s[n] <= '9')) n++;
+        if (!n) continue;
+        *vl = n; return s;
     }
     return NULL;
 }
