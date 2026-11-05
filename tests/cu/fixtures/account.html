@@ -1,0 +1,7 @@
+<!doctype html><meta charset=utf-8><title>Account fixture</title>
+<h1>Account</h1>
+<p id=who>checking</p>
+<script>
+var m=document.cookie.match(/(?:^|; )cuslim_session=([^;]*)/);
+document.getElementById('who').textContent=m?('Welcome, '+decodeURIComponent(m[1])):'Not signed in';
+</script>

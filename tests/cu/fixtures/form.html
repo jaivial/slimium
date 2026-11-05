@@ -1,0 +1,17 @@
+<!doctype html><meta charset=utf-8><title>Form fixture</title>
+<h1>Contact form</h1>
+<form id=f onsubmit="event.preventDefault();show()">
+<label>Full name <input id=name name=name></label>
+<label>Email <input id=email name=email type=email></label>
+<label>Color <select id=color name=color><option value=red>Red</option><option value=green>Green</option><option value=blue>Blue</option></select></label>
+<label><input id=agree type=checkbox name=agree> I agree</label>
+<label>Notes <textarea id=notes name=notes></textarea></label>
+<button type=submit>Send form</button>
+</form>
+<p id=result>not sent</p>
+<script>
+function show(){
+  var v=function(id){return document.getElementById(id)};
+  v('result').textContent='SENT name='+v('name').value+' email='+v('email').value+' color='+v('color').value+' agree='+v('agree').checked+' notes='+v('notes').value;
+}
+</script>
