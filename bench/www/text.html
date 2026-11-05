@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Bench Text Article</title>
+<style>body{font:16px/1.5 serif;max-width:46em;margin:auto}h2{font-family:sans-serif}</style>
+<script src="rand.js"></script></head><body><h1>A long article</h1><div id="a"></div>
+<script>
+var a = document.getElementById('a'), html = [];
+for (var s = 0; s < 120; s++) {
+  html.push('<h2>Section ' + (s + 1) + ': ' + sentence(5) + '</h2>');
+  for (var p = 0; p < 12; p++) html.push('<p>' + sentence(40) + ' <a href="#s' + s + '">' + sentence(3) + '</a> ' + sentence(30) + '</p>');
+}
+a.innerHTML = html.join('');
+document.body.dataset.ready = '1';
+</script></body></html>

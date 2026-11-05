@@ -1,0 +1,4 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Bench Inner Widget</title><script src="rand.js"></script></head>
+<body style="background:#eef"><h2>Embedded widget</h2><ul id="u"></ul>
+<script>var u = document.getElementById('u'), h = []; for (var i = 0; i < 400; i++) h.push('<li>' + sentence(12) + '</li>'); u.innerHTML = h.join('');
+var blob = []; for (var j = 0; j < 100000; j++) blob.push({j: j, s: 'w' + j});</script></body></html>

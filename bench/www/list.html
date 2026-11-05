@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Bench Long List</title>
+<style>li{padding:4px;border-bottom:1px solid #eee}li:nth-child(odd){background:#fafafa}.b{font-weight:bold}</style>
+<script src="rand.js"></script></head><body><h1>Search results</h1><ol id="l"></ol>
+<script>
+var l = document.getElementById('l'), f = document.createDocumentFragment();
+for (var i = 0; i < 20000; i++) {
+  var li = document.createElement('li'), b = document.createElement('span'); b.className = 'b'; b.textContent = 'Result ' + i + ' ';
+  li.appendChild(b); li.appendChild(document.createTextNode(sentence(10))); f.appendChild(li);
+}
+l.appendChild(f);
+document.body.dataset.ready = '1';
+</script></body></html>
