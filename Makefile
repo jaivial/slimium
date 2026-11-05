@@ -33,16 +33,19 @@ slimium-chrome: slimium
 	ln -sf slimium slimium-chrome
 
 $(BUILD)/unit: tests/unit.c $(LIBSRCS) $(HDRS) | $(BUILD)
-	$(CC) $(STD) $(WARN) -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Isrc -o $@ tests/unit.c $(LIBSRCS)
+	$(CC) $(STD) $(WARN) -O1 -g -Isrc -o $@ tests/unit.c $(LIBSRCS)
 
 unit: $(BUILD)/unit
 	$(BUILD)/unit
 
-# AddressSanitizer + UBSan build of the full CLI (used by tests/run.sh ASAN=1)
-asan: $(SRCS) $(HDRS) | $(BUILD)
+# AddressSanitizer + UBSan builds (CLI + unit). Needs a compiler with libasan/libubsan;
+# tests/asan.sh falls back to the Flatpak SDK's gcc when the host has none.
+SANFLAGS := -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
+asan: $(SRCS) $(HDRS) tests/unit.c
 	mkdir -p $(BUILD)/asan
-	$(CC) $(STD) $(WARN) -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -o $(BUILD)/asan/slimium $(SRCS)
+	$(CC) $(STD) $(WARN) $(SANFLAGS) -o $(BUILD)/asan/slimium $(SRCS)
 	ln -sf slimium $(BUILD)/asan/slimium-chrome
+	$(CC) $(STD) $(WARN) $(SANFLAGS) -Isrc -o $(BUILD)/asan/unit tests/unit.c $(LIBSRCS)
 
 test: all unit
 	tests/run.sh

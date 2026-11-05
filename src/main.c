@@ -250,6 +250,7 @@ static int cmd_batch(ctx_t *c, int argc, char **argv) {
     c->in_batch = 0;
     sb_reset(&c->oj); sb_reset(&c->ot);
     c->json = 0; /* results already printed; summary error goes to stderr only */
+    c->usage = 0;
     if (failures) return slim_seterr("batch: %d of %d commands failed", failures, count);
     return 0;
 }

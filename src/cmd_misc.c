@@ -78,13 +78,9 @@ static int purge_tab(ctx_t *c, const char *sid, jv info, void *arg) {
     (void)info;
     int *n = arg;
     int to = c->timeout < 10000 ? c->timeout : 10000;
-    long a, b;
-    if (cdp_send(&c->cdp, sid, "HeapProfiler.collectGarbage", NULL, &a) == 0 &&
-        cdp_send(&c->cdp, sid, "Memory.forciblyPurgeJavaScriptMemory", NULL, &b) == 0) {
-        int ok = cdp_wait(&c->cdp, a, sid, to, NULL, NULL) == 0;
-        cdp_wait(&c->cdp, b, sid, to, NULL, NULL);
-        if (ok) (*n)++;
-    }
+    /* NOTE: never Memory.forciblyPurgeJavaScriptMemory: it tears down the page's V8 contexts
+     * (OOM intervention) and leaves the tab without an execution context. */
+    if (cdp_call(&c->cdp, sid, "HeapProfiler.collectGarbage", NULL, to, NULL, NULL) == 0) (*n)++;
     return 0;
 }
 
