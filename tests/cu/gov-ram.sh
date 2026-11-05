@@ -42,9 +42,11 @@ print("%.1f %.1f %.1f %.1f" % (v[0]/1024, med/1024, v[-1]/1024, tw/1024))'; }
 
 one_run() { # one_run CONFIG RUN
   local cfg=$1 run=$2 B port cdp url err tab okc=0 shots=0 fx t0 i
-  local mode=fast hib=0
+  local mode=fast hib=0 prof=${SLIM_PROFILE:-balanced}
   case $cfg in
     slim) B=$(slim_browser) port=8790 cdp=9390 ;;
+    slim-max) B=$(slim_browser) port=8790 cdp=9390 prof=max ;;
+    slim-nosemi) B=$SHIM2 port=8790 cdp=9390 ;;               # balanced minus --js-flags=--max-semi-space-size=1
     slim-hib) B=$(slim_browser) port=8790 cdp=9390 hib=3 ;;   # + opt-in hibernation, K=3, untouched >= 20 s
     slim-nolite) B=$SHIM port=8790 cdp=9390 ;;                # balanced minus V8 --lite-mode (--js-flags=--no-lite-mode)
     stock) B=$ELF port=8791 cdp=9391 ;;
@@ -52,9 +54,13 @@ one_run() { # one_run CONFIG RUN
     *) echo "unknown config $cfg" >&2; return 1 ;;
   esac
   H=$(mktemp -d /tmp/cu-gov-ram.XXXXXX)
-  export CU_SLIM_HOME=$H CU_SLIM_MODE=$mode SLIM_PROFILE=${SLIM_PROFILE:-balanced} SLIM_GOV_LOG=$H/gov.log
+  export CU_SLIM_HOME=$H CU_SLIM_MODE=$mode SLIM_PROFILE=$prof SLIM_GOV_LOG=$H/gov.log
   export SLIM_GOV_HIBERNATE=$hib SLIM_GOV_HIBERNATE_MIN_S=20
   start_instance R "$H" "$port" "$cdp" "$B" >&2 || return 1
+  # lib.sh records the pid of 'setsid', which forks when it is a group leader: take the daemon
+  # pid from the HTTP listener instead (else the browser lookup and stop_instance miss it)
+  local D; D=$(ss -ltnpH "sport = :$port" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
+  if [ -n "$D" ] && [ "$D" != "$INST_PID_R" ]; then INST_PID_R=$D; INST_BROWSER_R=$(browser_pid_of "$D" "$cdp"); fi
   local P=$INST_BROWSER_R tabs=() w
   for w in $(seq 1 300); do [ -n "$P" ] && break; sleep 0.1; P=$(browser_pid_of "$INST_PID_R" "$cdp"); done
   if [ -z "$P" ]; then echo "$cfg: no browser pid under daemon $INST_PID_R" >&2; stop_instance R; return 1; fi
@@ -139,10 +145,14 @@ print(",".join(out))')
 SHIMD=$(mktemp -d /tmp/cu-gov-shim.XXXXXX) SHIM=$SHIMD/slimium-chrome
 NOLITE=$("$CU_TESTS_DIR/../../build/bench/slim-merge" balanced | sed 's/ --lite-mode//' | tr '\n' ' ')
 printf '#!/bin/sh\nSLIM_PROFILE=off exec %s "$@" %s\n' "$(slim_browser)" "$NOLITE" >"$SHIM"; chmod +x "$SHIM"
+mkdir -p "$SHIMD/nosemi"; SHIM2=$SHIMD/nosemi/slimium-chrome
+NOSEMI=$("$CU_TESTS_DIR/../../build/bench/slim-merge" balanced | grep -v '^--js-flags=' | tr '\n' ' ')
+printf '#!/bin/sh\nSLIM_PROFILE=off exec %s "$@" %s\n' "$(slim_browser)" "$NOSEMI" >"$SHIM2"; chmod +x "$SHIM2"
 trap 'cleanup; rm -rf "${SHIMD:?}"' EXIT
 before=$(user_cu_fingerprint)
 start_fixtures "$FIX_PORT" || exit 1
 { echo "# gov-ram $(date -Is) on $(hostname); settle=${SETTLE}s steady=${STEADY}s (5 s samples); SLIM_PROFILE=${SLIM_PROFILE:-balanced}"
+  echo "# per config: slim=balanced, slim-max=max, slim-nolite/nosemi=balanced minus that V8 flag, all + governor"
   echo "# slim browser: $(slim_browser) ($(git -C "$CU_TESTS_DIR" log --oneline -1 2>/dev/null)); MB = iso (anon+shmem+file union) of the browser tree"; } | tee "$OUT"
 for cfg in $CONFIGS; do for r in $(seq 1 "$RUNS"); do one_run "$cfg" "$r" | tee -a "$OUT"; done; done
 after=$(user_cu_fingerprint)

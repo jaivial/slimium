@@ -1,0 +1,10 @@
+# gov-ram 2026-11-05T23:14:57+01:00 on fedora; settle=4s steady=150s (5 s samples); SLIM_PROFILE=balanced
+# per config: slim=balanced, slim-max=max, slim-nolite/nosemi=balanced minus that V8 flag, all + governor
+# slim browser: /home/jaime/.local/bin/slimium-chrome (0028920 profile: --lite-mode only in max; gov: reflink every mapped engine file (v2 slots), private copies of system libs (LD_LIBRARY_PATH, glibc excluded), robust harness, workload-A standalone script); MB = iso (anon+shmem+file union) of the browser tree
+slim 1 settled_mb 498.1 (anon+shmem 229.0 file_union 269.1 procs 7) steady_min/med/max/twmean 217.3 230.2 498.1 233.8 active_peak 364.4 after30 250.9 snapshots 13/13 active_snapshots 13 shots 13 gc_passes 1 reclaims 18 hibernated 0 restored 0 gov_cpu 00:00:02 latency_ms(median/max) -
+slim-max 1 settled_mb 484.6 (anon+shmem 217.7 file_union 266.9 procs 7) steady_min/med/max/twmean 207.0 220.6 484.6 233.3 active_peak 352.1 after30 235.8 snapshots 13/13 active_snapshots 13 shots 13 gc_passes 1 reclaims 21 hibernated 0 restored 0 gov_cpu 00:00:02 latency_ms(median/max) -
+stock 1 settled_mb 584.9 (anon+shmem 310.8 file_union 274.1 procs 11) steady_min/med/max/twmean 533.0 536.0 584.9 543.5 active_peak 589.8 after30 589.8 snapshots 13/13 active_snapshots 13 shots 13 gc_passes - reclaims - gov_cpu - latency_ms(median/max) -
+slim 1 settled_mb 496.0 (anon+shmem 225.6 file_union 270.5 procs 7) steady_min/med/max/twmean 206.7 227.6 496.0 232.7 active_peak 367.8 after30 256.5 snapshots 13/13 active_snapshots 13 shots 13 gc_passes 2 reclaims 18 hibernated 0 restored 0 gov_cpu 00:00:02 latency_ms(median/max) -
+stock 1 settled_mb 581.3 (anon+shmem 310.3 file_union 271.0 procs 11) steady_min/med/max/twmean 528.8 532.3 581.3 539.5 active_peak 595.0 after30 589.1 snapshots 13/13 active_snapshots 13 shots 13 gc_passes - reclaims - gov_cpu - latency_ms(median/max) -
+stock 1 settled_mb 574.2 (anon+shmem 304.9 file_union 269.3 procs 11) steady_min/med/max/twmean 515.9 517.4 574.2 526.8 active_peak 555.9 after30 555.1 snapshots 13/13 active_snapshots 13 shots 13 gc_passes - reclaims - gov_cpu - latency_ms(median/max) -
+# user's cu untouched

@@ -103,7 +103,8 @@ the low-memory profile merged into the given argv — a drop-in browser for cu: 
 
 | `SLIM_GOV=0` | plain exec: no governor, no scope, no engine copy, no fadvise |
 | `SLIM_SCOPE=0` | do not wrap the engine in `systemd-run --user --scope` |
-| `SLIM_ENGINE_COPY=0` | use the system engine ELF instead of the private (reflinked) copy in `~/.cache/slimium/engines` |
+| `SLIM_ENGINE_COPY=0` | use the system engine files instead of the private (reflinked) copies in `~/.cache/slimium/engines` |
+| `SLIM_ENGINE_COPY_LIBS=0` | do not use private copies of the system shared libraries (LD_LIBRARY_PATH into the copy slot; glibc never copied) |
 | `SLIM_GOV_LOG=FILE`, `SLIM_GOV_*` | governor log (JSON lines) and knobs, see docs/GOVERNOR.md |
 
 `--version` is passed through unchanged (engine's version line on stdout, no profile flags, no governor).

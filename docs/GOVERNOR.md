@@ -11,18 +11,34 @@ docs/RESEARCH-structural.md §3.
 
 `slimium-chrome ARGS` (cu's `CU_BROWSER`) and `slimium start` (unless `--no-gov` / `SLIM_GOV=0`):
 
-1. **Private engine copy**: the engine ELF is copied to
-   `~/.cache/slimium/engines/<name>-<dev>-<ino>-<size>-<mtime>[.N]/` with `copy_file_range` (a
-   **reflink** on btrfs/xfs, so no extra disk). The other files of the engine dir (paks, icudtl,
-   locales, crashpad, libs) are symlinks. The browser runs from that copy. Reason: page cache is
-   charged to the cgroup that first faulted it, and on a machine where other Chromiums run (the
-   user's cu, other agents) the system ELF's pages are charged to *their* cgroups. Those pages are
-   also mapped, so `posix_fadvise` cannot drop them and our reclaim cannot evict them. Measured
-   with the system ELF: a reclaim freed 18 MB and iso did not move. There is **one slot per
-   concurrently running browser**: a slot is busy while a process has it as its exe, and up to
-   `SLIM_ENGINE_COPIES`=4 slots are made. Two browsers sharing one copy would share each other's
-   charges (measured: 470 MB steady instead of 316 MB). Copies of an older engine version are
-   removed when the source changes. `SLIM_ENGINE_COPY=0` uses the system ELF.
+1. **Private engine copy**: every mapped file of the engine dir is copied to
+   `~/.cache/slimium/engines/<name>-v2-<dev>-<ino>-<size>-<mtime>[.N]/` with `copy_file_range`
+   (a **reflink** on btrfs/xfs, so no extra disk). That covers the ELF, `.pak` resources,
+   `icudtl.dat`, `v8_context_snapshot.bin`, the bundled `.so` (libEGL, libGLESv2,
+   libvk_swiftshader, libvulkan), `chrome_crashpad_handler` and `locales/*.pak`. The setuid
+   `chrome-sandbox` and launcher scripts stay symlinks. The browser runs from that copy. Reason:
+   page cache is charged to the cgroup that first faulted it, and on a machine where other
+   Chromiums run (the user's cu, other agents) the system engine's pages are charged to *their*
+   cgroups. Those pages are also mapped, so `posix_fadvise` cannot drop them and our reclaim
+   cannot evict them. Measured with the system ELF: a reclaim freed 18 MB and iso did not move.
+   There is **one slot per concurrently running browser**: a slot is busy while a process has it
+   as its exe, and up to `SLIM_ENGINE_COPIES`=4 slots are made. Two browsers sharing one copy
+   would share each other's charges (measured: 470 MB steady instead of 316 MB). Copies of an
+   older engine version (or the v1 layout) are removed when the key changes.
+   `SLIM_ENGINE_COPY=0` uses the system files.
+   **System libraries** (`SLIM_ENGINE_COPY_LIBS`, default on with the governor): after the first
+   reclaim of an engine version, the governor records which system `.so` files the tree maps in
+   `<slot 0>/libs.list` (273 on Fedora 44: nss, gtk, glib, icu, harfbuzz, crypto, opensc, ...).
+   Later launches reflink them into `<slot>/lib/` with their SONAME alias symlinks and export
+   `LD_LIBRARY_PATH=<slot>/lib`. glibc's own libraries (libc, libm, ld-linux, libpthread,
+   libdl, librt, libresolv, libnss_*, ...) are **never** copied, because a stale libc next to a
+   newer system ld.so would break. A copy is redone whenever its source's size or mtime changes
+   (checked on every launch), and libraries dlopened by absolute path (p11-kit modules) still come
+   from the system. These copies hold ~50 MB of resident pages that are otherwise charged to the
+   rest of the desktop; with them they are the browser's own and reclaimable.
+   **Trade-off**: their hot part (~5-15 MB) is a real duplicate of pages the desktop already
+   shares, so iso drops while real RAM can rise slightly on a busy desktop. `SLIM_ENGINE_COPY_LIBS=0`
+   turns it off.
 2. **fadvise**: `posix_fadvise(DONTNEED)` on the (copied) ELF and the `.so/.pak/.dat/.bin` +
    `locales/` next to it. This drops only *unmapped* cached pages, typically those left by a
    previous browser on the same slot whose scope is gone, so their charge sits in the parent
@@ -115,7 +131,7 @@ Foreground mode prints the events (text, or JSON with `--json`) until the browse
 
 ## Tests
 
-`tests/gov.sh` (in `make test`, also `make test-gov`; CDP 9440-9442, temp profiles/state): 49 checks.
+`tests/gov.sh` (in `make test`, also `make test-gov`; CDP 9440-9442, temp profiles/state): 52 checks.
 Session start spawns a detached governor (not a child of the browser; command line without
 `--remote-debugging-port`), status/mem show iso and the governor pid, and the zygotes run in
 `slimium-PID-*.scope`. A concurrent second browser (the wrapper) gets a different engine copy. A
@@ -130,10 +146,44 @@ SVG, WebGL, img, transforms) after reclaim. With **51 tabs** the oldest tab stil
 governor exits within 10 s of the browser. An unscoped launch (`SLIM_SCOPE=0`) is skipped as
 foreign and its cgroup never reclaimed. Wrapper: `--version` spawns no governor, the engine keeps
 the pid the caller spawned, the governor is detached, the zygote scope is `slimium-PID-*`, a
-reclaim happens, nothing goes to stdout, and the governor exits with the engine. The user's cu
+reclaim happens, nothing goes to stdout, and the governor exits with the engine. A later launch maps the private library copies (never glibc) and evaluates. The user's cu
 fingerprint (daemon/browser pids, listeners 8810-8834/9362-9386) is unchanged.
 
 cu suite through cu-slim with the governor live (`tests/cu/run.sh`): **71/71**.
+
+## Numbers, round 2 (2026-11-05/06): all engine files + system libraries copied, lite-mode in max only
+
+Same protocol as below (`tests/cu/gov-ram.sh`, cu-slim, 13-tab flow, 150 s steady of 5 s samples).
+The configs alternated ABAB: balanced+gov, max+gov, cu-fast stock. The runs are listed with
+their steady median / time-weighted mean / active peak in MB.
+
+| config | runs (median / tw-mean / peak) | **median of runs** | settled | ratio vs cu-fast stock | ratio vs plain stock |
+|---|---|---|---:|---|---|
+| stock, cu fast mode | 536.0/543.5/590, 532.3/539.5/595, 517.4/526.8/556 | **532 / 540 / 590** | 574-585 | 1 | 0.75x |
+| stock-compat (plain Chromium; 1 run, round 1) | 709/706/751 | **709 / 706 / 751** | 722 | | 1 |
+| **balanced + governor** | 230.2/233.8/364, 227.6/232.7/368, 219.8/228.5/368, 223.4/240.2/371 | **225.5 / 233 / 368** | 496-498 | **0.42x / 0.43x / 0.62x** | **0.32x / 0.33x / 0.49x** |
+| **max + governor** | 220.6/233.3/352, 215.4/220.9/348, 211.9/218.9/347 | **215 / 221 / 348** | 485 | **0.40x / 0.41x / 0.59x** | 0.30x / 0.31x / 0.46x |
+| balanced minus `--max-semi-space-size=1` + governor | 223.6/229.4/364, 217.7/227.3/358 | 221 / 228 / 361 | 496-498 | 0.42x / 0.42x | |
+
+- In every steady series the "max" is the settled sample at t=0, before the first idle pass:
+  496-498 (balanced) and 485 (max) vs 574-585 for stock.
+- **Steady is under 0.5x of the strict baseline** (cu-fast stock) for both levels, by median and
+  by time-weighted mean, at about 0.42x. It went from 0.52x to 0.42x through: all engine files
+  copied (-8 MB), system libraries copied (-40 MB), and lite-mode no longer making a difference.
+- `--max-semi-space-size=1` is neutral here (221/228 without it vs 225/233 with it, within the
+  run-to-run spread of ±6 MB). It stays in balanced (it is the memory track's measured setting
+  for workload A).
+- Latency with library copies (5 rounds): cold after a reclaim snapshot 73/120, click 38/41,
+  shot 402/536 ms; warm 5/8, 5/5, 485/486 ms. The same as without the library copies.
+- **Standalone** (`bench/gov-standalone.sh`, workload A: 6 content-heavy pages on 6 loopback
+  hosts, `slimium start` balanced + governor vs the stock ELF with no flags, crashpad included):
+  slimium steady median/tw-mean 410.2/414.6 and 410.3/412.6 MB; stock 828.2/830.2 and 836.3/838.2
+  MB. That is **0.49x / 0.50x**. Settled: 647 vs 884-898.
+- What is left right after a reclaim (13 tabs, balanced, per-path union of mapped pages): 17-19 MB
+  in total. That is fonts 7 MB, glibc and other uncopied system files 4.2 MB, the hot part of the
+  libcrypto copy 2.1 MB, profile files 1.3 MB and Widevine 1 MB. 20 s later it is 42 MB (+23 MB of
+  hot engine code coming back). Nothing else in our control remains; the rest of iso is anon
+  (~195-230 MB: renderer + browser heaps).
 
 ## Numbers (2026-11-05, Chromium 156.0.8078.79, Fedora 44, kernel 7.2, cu 1.9.0 + slimium-integration)
 

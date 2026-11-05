@@ -18,8 +18,13 @@ engine's file pages, which makes PSS swing by ±40 MB between identical runs.
 | level | what | workload A iso (ELF) | vs stock ELF |
 |---|---|---|---|
 | off | caller's argv untouched | 901-952 MB (stock, median 914) | 1.00x |
-| balanced | all safe switches below | 643-647 MB | **0.70x** |
-| max | balanced + PartitionAlloc hardening off | 633-686 MB (bimodal; -14 MB vs balanced in the same mode, ABAB) | 0.69x (low mode) |
+| balanced | all safe switches below except `--lite-mode` | 766-775 MB without the governor (643-647 with lite-mode) | 0.84x (0.70x) |
+| max | balanced + `--lite-mode` + PartitionAlloc hardening off | 633-686 MB (bimodal; -14 MB vs balanced+lite in the same mode, ABAB) | 0.69x (low mode) |
+
+**2026-11-05 (gov track): `--lite-mode` moved from balanced to max.** With the memory governor
+(docs/GOVERNOR.md), which reclaims the engine's file pages while idle, lite-mode bought nothing
+measurable through cu (steady median 274 vs 275 MB on the cu 13-tab flow). It still costs CPU-bound
+JS 2.5-4x. Without the governor (`SLIM_GOV=0`), lite-mode is worth ~-120 MB on workload A: use max.
 | balanced on chrome-headless-shell (opt-in engine) | same switches | 475-476 MB | **0.52x** |
 | max on chrome-headless-shell | | 467-468 MB | 0.51x |
 
@@ -48,7 +53,7 @@ see docs/RESEARCH-structural.md).
 | `--disable-features=Translate,OptimizationHints,OptimizationGuideModelDownloading,OptimizationHintsFetching,OptimizationTargetPrediction,MediaRouter,DialMediaRouteProvider,AutofillServerCommunication,CertificateTransparencyComponentUpdater,InterestFeedContentSuggestions,CalculateNativeWinOcclusion,HeavyAdIntervention,LensOverlay` | background services and model downloads | ~-30 to -40 MB PSS together (noisy; structural research found ~-2 MB for ~40 browser features on an idle-ish tree — kept for the traffic) |
 | `--disable-features=BackForwardCache,SpareRendererForSitePerProcess` | no cached pages / spare renderers kept alive | ~0 on A (single navigation per tab); saves a renderer per navigated tab in long sessions |
 | `--enable-features=PartitionAllocMemoryReclaimer,PartitionAllocUseDenserDistribution,PartitionAllocSortActiveSlotSpans,PartitionAllocStraightenLargerSlotSpanFreeLists,PartitionAllocSortSmallerSlotSpanFreeLists,MemoryPurgeInBackground,MemoryPurgeOnFreeze` | allocator packing and reclaim; no security cost | a few MB (research, combined with the hardening knobs: -8 MB) |
-| `--js-flags=--max-semi-space-size=1 --lite-mode` | lite mode: no optimizing JIT, lazy feedback vectors, smaller V8 heaps; 1 MB young generation per isolate | **-120 MB iso** on A (balanced without it: 766-775, with it: 643-647); caveat: CPU-bound JS ~2.5-4x slower (`bench/www/jsperf.html`: 142-226 ms stock vs 555-647 ms), page loads unchanged in the benchmark |
+| `--js-flags=--max-semi-space-size=1` (balanced), `... --lite-mode` (max only) | 1 MB young generation per isolate; lite mode: no optimizing JIT, lazy feedback vectors, smaller V8 heaps | **-120 MB iso** on A (balanced without it: 766-775, with it: 643-647); caveat: CPU-bound JS ~2.5-4x slower (`bench/www/jsperf.html`: 142-226 ms stock vs 555-647 ms), page loads unchanged in the benchmark |
 | `--no-first-run` | no first-run UI | - |
 
 max adds:
