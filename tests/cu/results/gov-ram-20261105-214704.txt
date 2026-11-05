@@ -1,0 +1,5 @@
+# gov-ram 2026-11-05T21:47:04+01:00 on fedora; settle=4s steady=150s (5 s samples); SLIM_PROFILE=balanced
+# slim browser: /home/jaime/.local/bin/slimium-chrome (d515652 gov: activity-gated passes, adaptive (growth-triggered) reclaim, hibernation restore on client attach, tests/gov.sh (47 checks) in make test); MB = iso (anon+shmem+file union) of the browser tree
+slim 1 settled_mb 558.2 (anon+shmem 285.3 file_union 273.0 procs 9) steady_min/med/max/twmean 469.3 471.8 558.2 475.4 active_peak 517.7 after30 499.0 snapshots 13/13 shots 13 gc_passes 2 reclaims 8 gov_cpu 00:00:01
+stock 1 settled_mb 581.7 (anon+shmem 308.5 file_union 273.3 procs 11) steady_min/med/max/twmean 529.9 533.6 580.6 539.8 active_peak 584.8 after30 577.0 snapshots 13/13 shots 13 gc_passes - reclaims - gov_cpu -
+# user's cu untouched

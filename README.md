@@ -48,7 +48,7 @@ Exit codes: 0 ok, 1 error (one line on stderr), 2 usage error. `SLIM_DEBUG=1` tr
 
 | command | |
 |---|---|
-| `start [--profile off\|balanced\|max] [--headful] [--user-data-dir D] [--engine PATH] [--window WxH] [-- ARGS]` | launch detached (setsid, log file); default headless, port 9230-9361 (skips 9222, 9362-9386), data dir `~/.local/share/slimium/<session>` |
+| `start [--profile off\|balanced\|max] [--headful] [--user-data-dir D] [--engine PATH] [--window WxH] [--no-gov] [-- ARGS]` | launch detached (setsid, log file); default headless, port 9230-9361 (skips 9222, 9362-9386), data dir `~/.local/share/slimium/<session>`; with the memory governor, own systemd scope and private engine copy unless `--no-gov` / `SLIM_GOV=0` |
 | `stop` | Browser.close, then SIGTERM/SIGKILL of the browser's own process group; attached sessions are only forgotten |
 | `status` | alive, pid, port, browser, profile, tabs, procs/pss/rss/uss of the process tree |
 | `attach --port N` | adopt an existing browser (e.g. one cu started) as a session; never killed by `stop` |
@@ -71,7 +71,8 @@ Exit codes: 0 ok, 1 error (one line on stderr), 2 usage error. `SLIM_DEBUG=1` tr
 | `download-dir DIR\|off` | Browser.setDownloadBehavior (re-applied on connect) |
 | `frames` | frame tree |
 | `console` | console messages, exceptions and log entries (buffered ones are replayed) for --timeout MS (default 1000) |
-| `mem` | process-tree memory of the browser + JS heap per tab (heap is per renderer isolate, shared by tabs of one renderer) |
+| `mem` | process-tree memory of the browser (iso = anon + shmem + file_union, the official metric; pss/rss/uss; governor pid) + JS heap per tab (heap is per renderer isolate, shared by tabs of one renderer) |
+| `gov [--once] [--pid P] [--reclaim-s N] [--grow-mb N] [--idle-ms N] [--idle-cpu PCT] [--hibernate K] [--no-gc]` | memory governor in the foreground (events on stdout, JSON lines with `--json`); `--once` = one pass now, prints iso before/after. See docs/GOVERNOR.md |
 | `purge` | HeapProfiler.collectGarbage on every tab + Memory.simulatePressureNotification critical |
 | `freeze [ID]` / `thaw [ID]` | Page.setWebLifecycleState frozen/active |
 | `context-new [--url URL]` / `context-close ID` / `contexts` | isolated browser contexts (incognito-like) |
@@ -100,4 +101,20 @@ the low-memory profile merged into the given argv — a drop-in browser for cu: 
 | `SLIM_WRAPPER_LOG=FILE` | append the final argv (shell-quoted) |
 | `SLIM_ENGINE_DIRECT=0` | do not bypass distro launcher scripts (Fedora's chromium-browser.sh adds flags and two `cat` processes; by default the sibling ELF is exec'd) |
 
-`--version` is passed through unchanged (engine's version line on stdout, no profile flags).
+| `SLIM_GOV=0` | plain exec: no governor, no scope, no engine copy, no fadvise |
+| `SLIM_SCOPE=0` | do not wrap the engine in `systemd-run --user --scope` |
+| `SLIM_ENGINE_COPY=0` | use the system engine ELF instead of the private (reflinked) copy in `~/.cache/slimium/engines` |
+| `SLIM_GOV_LOG=FILE`, `SLIM_GOV_*` | governor log (JSON lines) and knobs, see docs/GOVERNOR.md |
+
+`--version` is passed through unchanged (engine's version line on stdout, no profile flags, no governor).
+
+### Memory governor
+
+By default `slimium-chrome` and `slimium start` keep the engine's pid but run it in its own systemd
+user scope (`systemd-run --user --scope`), from a private copy of the engine ELF (a reflink on
+btrfs/xfs). They also fork a detached `slimium gov` process. While the browser is idle (tree CPU
+< 5 % for 5 s) it sends critical memory pressure + GC once per idle period. Then it evicts the
+browser's cold file pages (mostly engine code) with cgroup v2 `memory.reclaim`
+(`swappiness=0`: file pages only, no swap). It does this every 30 s, or sooner once 24 MB came back,
+and only in cgroups whose processes all belong to the browser tree. Opt-in tab hibernation:
+`SLIM_GOV_HIBERNATE=K`. Details, numbers and caveats: [docs/GOVERNOR.md](docs/GOVERNOR.md).

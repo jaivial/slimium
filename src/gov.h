@@ -69,10 +69,12 @@ char **slim_scope_argv(char **av, pid_t pid);
  * own copy. SLIM_GOV_FADVISE=0 disables. Returns the number of files advised. */
 int slim_engine_fadvise(const char *engine);
 /* Private copy of the engine ELF (reflink/copy_file_range; the other files of its directory are
- * symlinks) in $XDG_CACHE_HOME/slimium/engines/<name>-<dev>-<ino>-<size>-<mtime>/: its page cache
- * belongs to this copy's inode only, so it is charged to (and reclaimable from) the browser's own
- * cgroups even while other Chromiums map the system ELF. Reused while the source is unchanged;
- * stale copies are removed. SLIM_ENGINE_COPY=0 disables. malloc'd path or NULL (use engine). */
+ * symlinks) in $XDG_CACHE_HOME/slimium/engines/<name>-<dev>-<ino>-<size>-<mtime>[.N]/: its page
+ * cache belongs to this copy's inode only, so it is charged to (and reclaimable from) the
+ * browser's own cgroups even while other Chromiums map the system ELF. One slot per concurrently
+ * running browser (SLIM_ENGINE_COPIES, default 4; a slot is busy while some process has it as
+ * its exe). Reused while the source is unchanged; copies of other versions are removed.
+ * SLIM_ENGINE_COPY=0 disables. malloc'd path or NULL (use engine). */
 char *slim_engine_private(const char *engine);
 /* pid of a running governor for root, or 0. */
 pid_t slim_gov_find(pid_t root);

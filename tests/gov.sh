@@ -51,6 +51,14 @@ ok governor-cmdline '! tr "\0" " " </proc/$G/cmdline | grep -q remote-debugging-
 ok status-governor '"$BIN" --session ga --json status | grep -q "\"governor\":$G"'
 ok status-iso '"$BIN" --session ga --json status | grep -Eq "\"iso_kb\":[0-9]+.*\"file_union_kb\":[0-9]+"'
 ok mem-iso '"$BIN" --session ga mem | grep -Eq "iso [0-9]+ KB = anon [0-9]+ \+ shmem [0-9]+ \+ file_union [0-9]+ KB \| governor pid $G"'
+# a second browser (the wrapper, as cu runs it) at the same time: each gets its own engine copy
+n0=$(pgrep -fc '^slimium gov ')
+SLIM_GOV_LOG=$ST/w.log "$WRAP" --headless=new --remote-debugging-port="$PW" --user-data-dir="$ST/udd-w" --no-first-run about:blank >"$ST/w.out" 2>/dev/null &
+WPID=$!
+for i in $(seq 1 100); do "$BIN" --port "$PW" status >/dev/null 2>&1 && break; sleep 0.1; done
+EA=$(readlink /proc/"$P"/exe) EW=$(readlink /proc/"$WPID"/exe)
+ok engine-copy "case \$EA in */slimium/engines/*) true;; *) false;; esac" "session engine $EA"
+ok engine-copy-per-browser '[ "$EA" != "$EW" ] && case $EW in */slimium/engines/*) true;; *) false;; esac' "$EA vs $EW"
 SCG=$(child_cg "$P")
 ok scoped "case \$SCG in */slimium-$P-*.scope) true;; *) false;; esac" "zygote cgroup $SCG"
 for f in form links long iframe render; do "$BIN" --session ga open "file://$FX/$f.html" >/dev/null; done
@@ -142,9 +150,6 @@ v=$("$WRAP" --version 2>&1)
 ok wrapper-version 'echo "$v" | grep -Eq "^(Chromium|Google Chrome) [0-9]+\."' "$v"
 sleep 0.3
 ok version-no-governor '[ "$(pgrep -fc "^slimium gov ")" = "$n0" ]'
-SLIM_GOV_LOG=$ST/w.log "$WRAP" --headless=new --remote-debugging-port="$PW" --user-data-dir="$ST/udd-w" --no-first-run about:blank >"$ST/w.out" 2>/dev/null &
-WPID=$!
-for i in $(seq 1 100); do "$BIN" --port "$PW" status >/dev/null 2>&1 && break; sleep 0.1; done
 ok wrapper-pid '[ "$("$BIN" --port "$PW" --json status | jget pid)" = "$WPID" ]' "engine pid is not the pid we spawned"
 WG=$("$BIN" --port "$PW" --json status | jget governor)
 ok wrapper-governor '[ "${WG:-0}" -gt 0 ] && [ "$(awk "{print \$4}" /proc/$WG/stat)" != "$WPID" ]' "governor=$WG"

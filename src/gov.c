@@ -898,11 +898,62 @@ static void rm_copy(const char *dir) {
     rmdir(dir);
 }
 
+/* Is path the executable of a running process (another browser using this copy)? */
+static int exe_in_use(const char *path) {
+    DIR *d = opendir("/proc");
+    if (!d) return 0;
+    struct dirent *de;
+    char p[64], x[PATH_MAX];
+    int used = 0;
+    while (!used && (de = readdir(d))) {
+        if (de->d_name[0] < '1' || de->d_name[0] > '9') continue;
+        snprintf(p, sizeof p, "/proc/%.24s/exe", de->d_name);
+        ssize_t l = readlink(p, x, sizeof x - 1);
+        if (l <= 0) continue;
+        x[l] = 0;
+        used = !strcmp(x, path);
+    }
+    closedir(d);
+    return used;
+}
+
+/* Copy dir fin (exe = fin/base): reuse if complete, else build it. 0 ok. */
+static int engine_slot(const char *root, const char *fin, const char *sdir, const char *base, const char *src, off_t size) {
+    char tmp[1400], p[2048], q[2048];
+    struct stat s2;
+    snprintf(p, sizeof p, "%s/%s", fin, base);
+    snprintf(q, sizeof q, "%s/.ok", fin);
+    if (stat(q, &s2) == 0 && stat(p, &s2) == 0 && s2.st_size == size) return 0;
+    if (mkdir_p(root, 0700)) return -1;
+    snprintf(tmp, sizeof tmp, "%s/.tmp-%d", root, (int)getpid());
+    rm_copy(tmp);
+    if (mkdir(tmp, 0700)) return -1;
+    DIR *d = opendir(sdir);
+    int bad = !d;
+    struct dirent *de;
+    while (!bad && (de = readdir(d))) {
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
+        snprintf(p, sizeof p, "%s/%s", tmp, de->d_name);
+        snprintf(q, sizeof q, "%s/%s", sdir, de->d_name);
+        if (!strcmp(de->d_name, base)) bad = copy_file(src, p, 0755) != 0;
+        else bad = symlink(q, p) != 0;
+    }
+    if (d) closedir(d);
+    snprintf(p, sizeof p, "%s/.ok", tmp);
+    int okfd = bad ? -1 : open(p, O_WRONLY | O_CREAT | O_CLOEXEC, 0600);
+    if (okfd < 0) { rm_copy(tmp); return -1; }
+    close(okfd);
+    if (rename(tmp, fin)) rm_copy(tmp);    /* lost a race: the other copy is as good */
+    snprintf(p, sizeof p, "%s/%s", fin, base);
+    snprintf(q, sizeof q, "%s/.ok", fin);
+    return stat(q, &s2) == 0 && stat(p, &s2) == 0 && s2.st_size == size ? 0 : -1;
+}
+
 char *slim_engine_private(const char *engine) {
     const char *e = getenv("SLIM_ENGINE_COPY");
     if ((e && !strcmp(e, "0")) || !engine) return NULL;
-    char src[PATH_MAX], sdir[1024], root[1024], key[256], fin[1400], tmp[1400], p[2048], q[2048];
-    struct stat st, s2;
+    char src[PATH_MAX], sdir[1024], root[1024], key[256], fin[1400], p[2048], q[2048];
+    struct stat st;
     if (!realpath(engine, src) || stat(src, &st) || !S_ISREG(st.st_mode) || strlen(src) >= sizeof sdir) return NULL;
     memcpy(sdir, src, strlen(src) + 1);
     char *sl = strrchr(sdir, '/');
@@ -916,43 +967,40 @@ char *slim_engine_private(const char *engine) {
     if (strstr(src, root) == src) return NULL;   /* already a copy */
     snprintf(key, sizeof key, "%.64s-%lx-%lx-%lld-%lld", base, (unsigned long)st.st_dev, (unsigned long)st.st_ino,
              (long long)st.st_size, (long long)st.st_mtime);
-    snprintf(fin, sizeof fin, "%s/%s", root, key);
-    snprintf(p, sizeof p, "%s/%s", fin, base);
-    snprintf(q, sizeof q, "%s/.ok", fin);
-    if (stat(q, &s2) == 0 && stat(p, &s2) == 0 && s2.st_size == st.st_size) return xstrdup(p);
-    if (mkdir_p(root, 0700)) return NULL;
-    snprintf(tmp, sizeof tmp, "%s/.tmp-%d", root, (int)getpid());
-    rm_copy(tmp);
-    if (mkdir(tmp, 0700)) return NULL;
-    DIR *d = opendir(sdir);
-    int bad = !d;
-    struct dirent *de;
-    while (!bad && (de = readdir(d))) {
-        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
-        snprintf(p, sizeof p, "%s/%s", tmp, de->d_name);
-        snprintf(q, sizeof q, "%s/%s", sdir, de->d_name);
-        if (!strcmp(de->d_name, base)) bad = copy_file(q, p, 0755) != 0;
-        else bad = symlink(q, p) != 0;
+    /* One copy per concurrently running browser: page cache is charged to whoever faults it first,
+     * so two browsers sharing a copy would share (and fail to reclaim) each other's pages. Slot
+     * <key> first, then <key>.1 ...; a slot whose exe a running process has is busy. */
+    long slots = 4;
+    const char *ns = getenv("SLIM_ENGINE_COPIES");
+    if (ns && *ns && (parse_int(ns, &slots) || slots < 1 || slots > 64)) slots = 4;
+    int got = -1;
+    for (long i = 0; i < slots && got < 0; i++) {
+        if (i) snprintf(fin, sizeof fin, "%s/%s.%ld", root, key, i); else snprintf(fin, sizeof fin, "%s/%s", root, key);
+        snprintf(p, sizeof p, "%s/%s", fin, base);
+        if (access(p, X_OK) == 0 && exe_in_use(p)) continue;
+        if (engine_slot(root, fin, sdir, base, src, st.st_size) == 0) got = (int)i;
+        else break;
     }
-    if (d) closedir(d);
-    snprintf(p, sizeof p, "%s/.ok", tmp);
-    int okfd = bad ? -1 : open(p, O_WRONLY | O_CREAT | O_CLOEXEC, 0600);
-    if (okfd < 0) { rm_copy(tmp); return NULL; }
-    close(okfd);
-    if (rename(tmp, fin)) rm_copy(tmp);    /* lost a race: the other copy is as good */
-    snprintf(q, sizeof q, "%s/.ok", fin);
-    snprintf(p, sizeof p, "%s/%s", fin, base);
-    if (stat(q, &s2) || stat(p, &s2) || s2.st_size != st.st_size) return NULL;
+    if (got < 0) {   /* all busy (or a copy failed): share slot 0 if it exists */
+        snprintf(fin, sizeof fin, "%s/%s", root, key);
+        snprintf(p, sizeof p, "%s/%s", fin, base);
+        snprintf(q, sizeof q, "%s/.ok", fin);
+        if (access(q, F_OK) || access(p, X_OK)) return NULL;
+    }
+    char *res = xstrdup(p);
     /* drop copies of older versions of this engine (a running browser keeps its unlinked inode) */
-    size_t bl = strlen(base);
-    if ((d = opendir(root))) {
+    size_t bl = strlen(base), kl = strlen(key);
+    DIR *d = opendir(root);
+    struct dirent *de;
+    if (d) {
         while ((de = readdir(d))) {
-            if (strncmp(de->d_name, base, bl) || de->d_name[bl] != '-' || !strcmp(de->d_name, key)) continue;
+            if (strncmp(de->d_name, base, bl) || de->d_name[bl] != '-') continue;
+            if (!strncmp(de->d_name, key, kl) && (!de->d_name[kl] || de->d_name[kl] == '.')) continue;
             if (snprintf(q, sizeof q, "%s/%s", root, de->d_name) < (int)sizeof q) rm_copy(q);
         }
         closedir(d);
     }
-    return xstrdup(p);
+    return res;
 }
 
 pid_t slim_gov_find(pid_t root) {
