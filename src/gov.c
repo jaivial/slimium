@@ -54,6 +54,7 @@ typedef struct {
     char okcg[MAXCG][PATH_MAX / 4];  /* cgroup dirs reclaimed last time (adaptive trigger) */
     int nok;
     long post_kb;             /* their file pages right after that reclaim */
+    int libs_done;
 } gov_t;
 
 static volatile sig_atomic_t g_stop;
@@ -351,6 +352,65 @@ static void reclaim(gov_t *g, slim_gov_pass *r) {
         ev_end(g, &e);
         if (stop) break;
     }
+}
+
+/* glibc proper: a copy of these next to a newer system ld.so would break; never copied. */
+static int glibc_lib(const char *b) {
+    static const char *const pre[] = {"libc.so", "libm.so", "ld-linux", "libpthread", "libdl.so", "librt.so", "libresolv",
+                                      "libutil.so", "libanl", "libnss_", "libmvec", "libBrokenLocale", "libthread_db", "libc_malloc", NULL};
+    for (int i = 0; pre[i]; i++) if (!strncmp(b, pre[i], strlen(pre[i]))) return 1;
+    return 0;
+}
+
+/* The libs.list of an engine version lives in its slot 0 dir: strip a ".N" slot suffix. */
+static void slot0(char *dir) {
+    char *d = strrchr(dir, '.'), *s = strrchr(dir, '/');
+    if (!d || (s && d < s) || !d[1]) return;
+    for (char *c = d + 1; *c; c++) if (*c < '0' || *c > '9') return;
+    *d = 0;
+}
+
+/* Record the system libraries the tree maps in <slot 0>/libs.list (once per engine version). */
+static void record_libs(gov_t *g) {
+    const char *on = getenv("SLIM_ENGINE_COPY_LIBS");
+    if ((on && !strcmp(on, "0")) || g->libs_done) return;
+    g->libs_done = 1;
+    char exe[PATH_MAX], p[64], lf[PATH_MAX], tmp[PATH_MAX + 16];
+    snprintf(p, sizeof p, "/proc/%d/exe", (int)g->cfg->root);
+    ssize_t l = readlink(p, exe, sizeof exe - 1);
+    if (l <= 0) return;
+    exe[l] = 0;
+    char *sl = strrchr(exe, '/');
+    if (!sl || !strstr(exe, "/slimium/engines/")) return;
+    *sl = 0;
+    slot0(exe);
+    snprintf(lf, sizeof lf, "%.4000s/libs.list", exe);
+    if (access(lf, F_OK) == 0) return;
+    sbuf out = {0};
+    for (int i = 0; i < g->n; i++) {
+        char *m; size_t n;
+        snprintf(p, sizeof p, "/proc/%d/maps", (int)g->set[i].pid);
+        if (read_file(p, &m, &n, 1 << 22)) continue;
+        for (char *s = m; s && *s; s = strchr(s, '\n'), s = s ? s + 1 : NULL) {
+            char *f = strchr(s, '/'), *e = strchr(s, '\n');
+            if (!f || (e && f > e)) continue;
+            size_t fl = e ? (size_t)(e - f) : strlen(f);
+            char path[PATH_MAX];
+            if (fl >= sizeof path) continue;
+            memcpy(path, f, fl); path[fl] = 0;
+            if ((strncmp(path, "/usr/lib64/", 11) && strncmp(path, "/lib64/", 7) && strncmp(path, "/usr/lib/", 9)) ||
+                !strstr(path_base(path), ".so") || glibc_lib(path_base(path)) || strstr(path, " (deleted)")) continue;
+            char needle[PATH_MAX + 2];
+            snprintf(needle, sizeof needle, "%s\n", path);
+            if (out.p && (strstr(out.p, needle) == out.p || (strstr(out.p, needle) && strstr(out.p, needle)[-1] == '\n'))) continue;
+            sb_puts(&out, needle);
+        }
+        free(m);
+    }
+    snprintf(tmp, sizeof tmp, "%s.%d", lf, (int)getpid());
+    if (out.n && write_file(tmp, out.p, out.n, 0) == 0 && rename(tmp, lf)) unlink(tmp);
+    if (out.n) { ev_t e; ev_new(g, &e, "libs-recorded"); ev_s(&e, "list", lf); ev_end(g, &e); }
+    sb_free(&out);
 }
 
 /* Growth of the MAPPED file pages (memory.stat file_mapped, what iso counts) of the cgroups
@@ -670,7 +730,7 @@ int slim_gov_run(slim_gov_cfg *cfg) {
         slim_gov_pass r;
         do_pass(g, &r, gc, gc, rec, 0);
         if (gc) busy_gc = 0;
-        if (rec) { busy_rec = 0; last_reclaim = now_ms(); }
+        if (rec) { busy_rec = 0; last_reclaim = now_ms(); record_libs(g); }
         if (rec == 2) { ev_new(g, &e, "grown"); ev_kb(&e, "file_growth", grown); ev_end(g, &e); }
         grace_until = now_ms() + (gc ? 2000 : GRACE_MS);
     }
@@ -853,6 +913,7 @@ int slim_engine_fadvise(const char *engine) {
     n += advise_dir(dir, 0);
     size_t l = strlen(dir);
     if (l + 9 < sizeof dir) { memcpy(dir + l, "/locales", 9); n += advise_dir(dir, 0); }
+    if (l + 5 < sizeof dir) { memcpy(dir + l, "/lib", 5); n += advise_dir(dir, 1); }
     return n;
 }
 
@@ -888,8 +949,36 @@ static int copy_file(const char *src, const char *dst, mode_t mode) {
     return ok ? 0 : -1;
 }
 
-/* Remove a copy dir made by slim_engine_private (regular files and symlinks only, then the dir). */
-static void rm_copy(const char *dir) {
+/* Engine-dir files that get mapped by the browser (its page cache must be ours): everything but
+ * the setuid sandbox helper and launcher scripts, which stay symlinks. */
+static int own_copy(const char *name) {
+    size_t l = strlen(name);
+    return strcmp(name, "chrome-sandbox") && !(l > 3 && !strcmp(name + l - 3, ".sh"));
+}
+
+/* Copy (reflink) the regular files of src into a new dir dst (locales/). 0 ok. */
+static int copy_dir(const char *src, const char *dst) {
+    if (mkdir(dst, 0700)) return -1;
+    DIR *d = opendir(src);
+    if (!d) return -1;
+    struct dirent *de;
+    char p[2048], q[2048];
+    int bad = 0;
+    while (!bad && (de = readdir(d))) {
+        if (de->d_name[0] == '.') continue;
+        struct stat es;
+        if (snprintf(q, sizeof q, "%s/%s", src, de->d_name) >= (int)sizeof q ||
+            snprintf(p, sizeof p, "%s/%s", dst, de->d_name) >= (int)sizeof p) { bad = 1; break; }
+        if (stat(q, &es) || !S_ISREG(es.st_mode)) continue;
+        bad = copy_file(q, p, es.st_mode & 0755) != 0;
+    }
+    closedir(d);
+    return bad ? -1 : 0;
+}
+
+/* Remove a copy dir made by slim_engine_private: its files and symlinks, one level of
+ * subdirectories (locales/), then the dir. */
+static void rm_copy_sub(const char *dir) {
     DIR *d = opendir(dir);
     if (!d) return;
     struct dirent *de;
@@ -897,6 +986,20 @@ static void rm_copy(const char *dir) {
     while ((de = readdir(d))) {
         if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
         if (snprintf(p, sizeof p, "%s/%s", dir, de->d_name) < (int)sizeof p) unlink(p);
+    }
+    closedir(d);
+    rmdir(dir);
+}
+static void rm_copy(const char *dir) {
+    DIR *d = opendir(dir);
+    if (!d) return;
+    struct dirent *de;
+    char p[PATH_MAX];
+    while ((de = readdir(d))) {
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
+        if (snprintf(p, sizeof p, "%s/%s", dir, de->d_name) >= (int)sizeof p) continue;
+        struct stat ls;
+        if (lstat(p, &ls) == 0 && S_ISDIR(ls.st_mode)) rm_copy_sub(p); else unlink(p);
     }
     closedir(d);
     rmdir(dir);
@@ -939,7 +1042,12 @@ static int engine_slot(const char *root, const char *fin, const char *sdir, cons
         if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
         snprintf(p, sizeof p, "%s/%s", tmp, de->d_name);
         snprintf(q, sizeof q, "%s/%s", sdir, de->d_name);
+        struct stat es;
         if (!strcmp(de->d_name, base)) bad = copy_file(src, p, 0755) != 0;
+        else if (stat(q, &es)) bad = symlink(q, p) != 0;
+        else if (S_ISREG(es.st_mode) && !own_copy(de->d_name)) bad = symlink(q, p) != 0;
+        else if (S_ISREG(es.st_mode)) bad = copy_file(q, p, es.st_mode & 0755) != 0;
+        else if (S_ISDIR(es.st_mode) && !strcmp(de->d_name, "locales")) bad = copy_dir(q, p) != 0;
         else bad = symlink(q, p) != 0;
     }
     if (d) closedir(d);
@@ -969,7 +1077,7 @@ char *slim_engine_private(const char *engine) {
     else if (h && *h == '/') snprintf(root, sizeof root, "%s/.cache/slimium/engines", h);
     else return NULL;
     if (strstr(src, root) == src) return NULL;   /* already a copy */
-    snprintf(key, sizeof key, "%.64s-%lx-%lx-%lld-%lld", base, (unsigned long)st.st_dev, (unsigned long)st.st_ino,
+    snprintf(key, sizeof key, "%.64s-v2-%lx-%lx-%lld-%lld", base, (unsigned long)st.st_dev, (unsigned long)st.st_ino,
              (long long)st.st_size, (long long)st.st_mtime);
     /* One copy per concurrently running browser: page cache is charged to whoever faults it first,
      * so two browsers sharing a copy would share (and fail to reclaim) each other's pages. Slot
@@ -1005,6 +1113,78 @@ char *slim_engine_private(const char *engine) {
         closedir(d);
     }
     return res;
+}
+
+/* Symlinks in dir resolving to file name real (SONAME aliases like libfoo.so.1 -> libfoo.so.1.2.3)
+ * become symlinks in ldir pointing at the copy. */
+static void lib_aliases(const char *dir, const char *real, const char *ldir) {
+    DIR *d = opendir(dir);
+    if (!d) return;
+    struct dirent *de;
+    char p[PATH_MAX], t[PATH_MAX], a[PATH_MAX];
+    while ((de = readdir(d))) {
+        if (de->d_type != DT_LNK || strncmp(de->d_name, real, 3)) continue;
+        if (snprintf(p, sizeof p, "%s/%.200s", dir, de->d_name) >= (int)sizeof p) continue;
+        ssize_t l = readlink(p, t, sizeof t - 1);
+        if (l <= 0) continue;
+        t[l] = 0;
+        if (strcmp(path_base(t), real)) continue;
+        snprintf(a, sizeof a, "%.3800s/%.200s", ldir, de->d_name);
+        unlink(a);
+        if (symlink(real, a)) { /* best effort */ }
+    }
+    closedir(d);
+}
+
+int slim_engine_libs(const char *exe) {
+    const char *on = getenv("SLIM_ENGINE_COPY_LIBS");
+    if ((on && !strcmp(on, "0")) || !exe || !strstr(exe, "/slimium/engines/")) return 0;
+    char dir[PATH_MAX], d0[PATH_MAX], lf[PATH_MAX], ldir[PATH_MAX];
+    snprintf(dir, sizeof dir, "%s", exe);
+    char *sl = strrchr(dir, '/');
+    if (!sl) return 0;
+    *sl = 0;
+    memcpy(d0, dir, strlen(dir) + 1);
+    slot0(d0);
+    snprintf(lf, sizeof lf, "%.4000s/libs.list", d0);
+    snprintf(ldir, sizeof ldir, "%.4000s/lib", dir);
+    char *list; size_t n;
+    if (read_file(lf, &list, &n, 1 << 20)) return 0;
+    mkdir(ldir, 0700);
+    int k = 0;
+    for (char *s = list, *e; *s; s = e ? e + 1 : s + strlen(s)) {
+        e = strchr(s, '\n');
+        if (e) *e = 0;
+        if (*s != '/' || glibc_lib(path_base(s))) { if (!e) break; continue; }
+        struct stat ss, ds;
+        char dst[PATH_MAX], sdir[PATH_MAX];
+        snprintf(dst, sizeof dst, "%.3000s/%.200s", ldir, path_base(s));
+        if (stat(s, &ss) || !S_ISREG(ss.st_mode)) { unlink(dst); if (!e) break; continue; }
+        if (stat(dst, &ds) || ds.st_size != ss.st_size || ds.st_mtime != ss.st_mtime) {
+            char tmp[PATH_MAX + 16];
+            snprintf(tmp, sizeof tmp, "%s.%d", dst, (int)getpid());
+            unlink(tmp);
+            if (copy_file(s, tmp, 0755)) { unlink(tmp); if (!e) break; continue; }
+            struct timespec tv[2] = {ss.st_atim, ss.st_mtim};
+            utimensat(AT_FDCWD, tmp, tv, 0);
+            if (rename(tmp, dst)) { unlink(tmp); if (!e) break; continue; }
+            snprintf(sdir, sizeof sdir, "%s", s);
+            char *q = strrchr(sdir, '/');
+            if (q) { *q = 0; lib_aliases(sdir, path_base(s), ldir); }
+        }
+        k++;
+        if (!e) break;
+    }
+    free(list);
+    if (k) {
+        const char *old = getenv("LD_LIBRARY_PATH");
+        sbuf v = {0};
+        sb_puts(&v, ldir);
+        if (old && *old) { sb_putc(&v, ':'); sb_puts(&v, old); }
+        setenv("LD_LIBRARY_PATH", v.p, 1);
+        sb_free(&v);
+    }
+    return k;
 }
 
 pid_t slim_gov_find(pid_t root) {

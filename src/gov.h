@@ -77,6 +77,13 @@ int slim_engine_fadvise(const char *engine);
  * its exe). Reused while the source is unchanged; copies of other versions are removed.
  * SLIM_ENGINE_COPY=0 disables. malloc'd path or NULL (use engine). */
 char *slim_engine_private(const char *engine);
+/* Private reflinked copies of the system shared libraries the browser maps (default with the
+ * governor; SLIM_ENGINE_COPY_LIBS=0 disables). The list is recorded by the governor in
+ * <slot 0>/libs.list on the first run of an engine version, so that first run uses the system ones;
+ * in <slot>/lib/ with their SONAME aliases, exported via LD_LIBRARY_PATH, so their page cache is
+ * charged to the browser's scope and reclaimable too. glibc's own libraries are never copied.
+ * Copies are redone when a source changes (size/mtime). Returns the number of libraries set up. */
+int slim_engine_libs(const char *exe);
 /* pid of a running governor for root, or 0. */
 pid_t slim_gov_find(pid_t root);
 

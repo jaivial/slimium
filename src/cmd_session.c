@@ -95,7 +95,7 @@ int wrapper_main(int argc, char **argv) {
     if (!engine) { fprintf(stderr, "slimium-chrome: %s\n", slim_errmsg()); return 127; }
     const char *gv = getenv("SLIM_GOV");
     int gov = !ver && !(gv && !strcmp(gv, "0"));
-    if (gov) { char *pe = slim_engine_private(engine); if (pe) { free(engine); engine = pe; } }
+    if (gov) { char *pe = slim_engine_private(engine); if (pe) { free(engine); engine = pe; slim_engine_libs(engine); } }
     char **av;
     if (ver) {
         av = xmalloc(sizeof *av * (size_t)(argc + 1));
@@ -220,7 +220,7 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
 
     char *engine = slim_find_engine(eng, 1);
     if (!engine) return -1;
-    if (gov_on) { char *pe = slim_engine_private(engine); if (pe) { free(engine); engine = pe; } }
+    if (gov_on) { char *pe = slim_engine_private(engine); if (pe) { free(engine); engine = pe; slim_engine_libs(engine); } }
 
     sbuf ud = {0};
     if (udd) sb_puts(&ud, udd);

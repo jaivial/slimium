@@ -1,0 +1,4 @@
+# gov-ram 2026-11-05T23:06:47+01:00 on fedora; settle=4s steady=150s (5 s samples); SLIM_PROFILE=balanced
+# slim browser: /home/jaime/.local/bin/slimium-chrome (5fd0a77 docs/GOVERNOR.md: design, safety, numbers through cu (stock vs slimium settled/steady/peak, latency, fadvise), caveats; gov-ram results); MB = iso (anon+shmem+file union) of the browser tree
+slim 1 settled_mb 497.1 (anon+shmem 227.8 file_union 269.3 procs 7) steady_min/med/max/twmean 252.3 266.2 497.1 272.6 active_peak 403.7 after30 294.3 snapshots 13/13 active_snapshots 13 shots 13 gc_passes 1 reclaims 17 hibernated 0 restored 0 gov_cpu 00:00:01 latency_ms(median/max) -
+# user's cu untouched

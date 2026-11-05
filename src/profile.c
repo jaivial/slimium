@@ -40,10 +40,12 @@
     "PartitionAllocSortActiveSlotSpans,PartitionAllocStraightenLargerSlotSpanFreeLists," \
     "PartitionAllocSortSmallerSlotSpanFreeLists,MemoryPurgeInBackground,MemoryPurgeOnFreeze"
 
-/* V8 lite mode (no optimizing JIT, lazy feedback): the largest content saving
- * once the process model is collapsed (~-100 MB iso on workload A); CPU-bound
- * JS runs ~2.5-4x slower (bench/www/jsperf.html), page loads are unchanged. */
-#define SLIM_JS "--js-flags=--max-semi-space-size=1 --lite-mode"
+/* V8: 1 MB young generation per isolate (balanced and max). V8 lite mode (no
+ * optimizing JIT, lazy feedback) only in max: ~-100 MB iso on workload A without
+ * the governor, but no measurable gain through cu with the governor (docs/GOVERNOR.md)
+ * and CPU-bound JS runs ~2.5-4x slower (bench/www/jsperf.html). */
+#define SLIM_JS "--js-flags=--max-semi-space-size=1"
+#define SLIM_JS_MAX "--js-flags=--max-semi-space-size=1 --lite-mode"
 
 static const char *const balanced[] = {
     SLIM_SWITCHES,
@@ -52,15 +54,15 @@ static const char *const balanced[] = {
     SLIM_JS,
     NULL};
 
-/* max = balanced + PartitionAlloc hardening off (BackupRefPtr, the scheduler
- * loop quarantine and GWP-ASan protect against use-after-free: a security cost). */
+/* max = balanced + V8 lite mode + PartitionAlloc hardening off (BackupRefPtr, the
+ * scheduler loop quarantine and GWP-ASan protect against use-after-free: a security cost). */
 static const char *const max_[] = {
     SLIM_SWITCHES,
     "--disable-features=" SLIM_DISABLE ",PartitionAllocBackupRefPtr,PartitionAllocSchedulerLoopQuarantine,"
     "PartitionAllocLargeThreadCacheSize,PartitionAllocEventuallyZeroFreedMemory,GwpAsanMalloc,"
     "GwpAsanPartitionAlloc,PartitionAllocLargeEmptySlotSpanRing,PartitionAllocAdjustSizeWhenInForeground",
     "--enable-features=" SLIM_ENABLE,
-    SLIM_JS,
+    SLIM_JS_MAX,
     NULL};
 
 int slim_profile_parse(const char *s) {

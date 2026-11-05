@@ -55,7 +55,10 @@ one_run() { # one_run CONFIG RUN
   export CU_SLIM_HOME=$H CU_SLIM_MODE=$mode SLIM_PROFILE=${SLIM_PROFILE:-balanced} SLIM_GOV_LOG=$H/gov.log
   export SLIM_GOV_HIBERNATE=$hib SLIM_GOV_HIBERNATE_MIN_S=20
   start_instance R "$H" "$port" "$cdp" "$B" >&2 || return 1
-  local P=$INST_BROWSER_R tabs=()
+  local P=$INST_BROWSER_R tabs=() w
+  for w in $(seq 1 300); do [ -n "$P" ] && break; sleep 0.1; P=$(browser_pid_of "$INST_PID_R" "$cdp"); done
+  if [ -z "$P" ]; then echo "$cfg: no browser pid under daemon $INST_PID_R" >&2; stop_instance R; return 1; fi
+  INST_BROWSER_R=$P
   local urls=()
   for fx in form login links iframe shadow long download late upload index; do urls+=("$BASE/$fx.html"); done
   for url in $REAL; do urls+=("$url"); done

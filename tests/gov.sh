@@ -21,6 +21,7 @@ WPID= SPID= BG=
 cleanup() {
     "$BIN" --session ga stop >/dev/null 2>&1
     "$BIN" --session gb stop >/dev/null 2>&1
+    "$BIN" --session gc stop >/dev/null 2>&1
     [ -n "$WPID" ] && kill "$WPID" 2>/dev/null
     [ -n "$SPID" ] && kill "$SPID" 2>/dev/null
     [ -n "$BG" ] && kill "$BG" 2>/dev/null
@@ -132,6 +133,14 @@ echo "   governor: rss ${rss} KB (pss ${pss}, anon ${anon}), cpu $(ps -o time= -
 "$BIN" --session ga stop >/dev/null
 ok governor-exits 'gone "$G" 10' "governor $G still alive after the browser stopped"
 ok exit-logged 'grep -q "\"ev\":\"exit\",\"pid\":$P" "$SLIM_GOV_LOG"'
+
+# ---- system library copies (list recorded by the governor above): a new launch maps them ----
+out=$("$BIN" --session gc --json start --port "$PB" --user-data-dir "$ST/udd-c")
+PC=$(echo "$out" | jget pid)
+ok lib-copies 'grep -q "/slimium/engines/[^ ]*/lib/lib" /proc/$PC/maps' "no private library copy mapped"
+ok lib-no-glibc '! grep -Eq "/slimium/engines/[^ ]*/lib/(libc\.so|ld-linux|libm\.so)" /proc/$PC/maps'
+ok lib-eval '[ "$("$BIN" --session gc eval "1+1")" = 2 ]'
+"$BIN" --session gc stop >/dev/null
 
 # ---- unscoped launch (SLIM_SCOPE=0, --no-gov): the shared cgroup is never reclaimed ----
 out=$(SLIM_SCOPE=0 "$BIN" --session gb --json start --port "$PB" --user-data-dir "$ST/udd-b" --no-gov)
