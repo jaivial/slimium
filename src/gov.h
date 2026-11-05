@@ -20,7 +20,7 @@ typedef struct {
     double idle_cpu;               /* SLIM_GOV_IDLE_CPU, % of one core (5) */
     int reclaim_s;                 /* SLIM_GOV_RECLAIM_S (30): reclaim at least this often while idle; 0 = never */
     int grow_mb;                   /* SLIM_GOV_RECLAIM_GROW_MB (24): reclaim early once the reclaimed cgroups'
-                                      file pages grew this much since the last reclaim; 0 = timer only */
+                                      mapped file pages grew this much since the last reclaim; 0 = timer only */
     int min_s;                     /* SLIM_GOV_RECLAIM_MIN_S (5): never reclaim more often than this */
     int gc;                        /* SLIM_GOV_GC (1): pressure + GC pass */
     int hibernate;                 /* SLIM_GOV_HIBERNATE (0 = off): keep K most recent tabs */
@@ -28,7 +28,8 @@ typedef struct {
     int busy_ms;                   /* SLIM_GOV_BUSY_MS (1000): tree CPU time above idle_cpu that counts as
                                       real activity (re-arms the GC pass and an early reclaim) */
     int wait_engine;               /* wrapper mode: root is still slimium/systemd-run until it execs */
-    int measure;                   /* measure iso before/after each pass (log/out only) */
+    int measure;                   /* SLIM_GOV_MEASURE (0; 1 in the foreground CLI): iso before/after each
+                                      pass in the events (two pagemap scans of the tree per pass) */
     int out_fd;                    /* events (text, or JSON with json=1); -1 = none */
     int json;
     int log_fd;                    /* SLIM_GOV_LOG (JSON lines), -1 = none */

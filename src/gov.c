@@ -337,9 +337,10 @@ static void reclaim(gov_t *g, slim_gov_pass *r) {
         long after = cg_file_kb(dir);
         if (before > 0 && after >= 0 && before > after) r->reclaimed_kb += before - after;
         r->cgroups_ok++;
-        if (after >= 0 && g->nok < MAXCG && strlen(dir) < sizeof g->okcg[0]) {
+        long mapped = stat_kb(dir, "file_mapped");
+        if (mapped >= 0 && g->nok < MAXCG && strlen(dir) < sizeof g->okcg[0]) {
             memcpy(g->okcg[g->nok++], dir, strlen(dir) + 1);
-            g->post_kb += after;
+            g->post_kb += mapped;
         }
         ev_new(g, &e, "reclaim");
         ev_s(&e, "cgroup", cgs[k]); ev_kb(&e, "file_before", before); ev_kb(&e, "file_after", after);
@@ -352,11 +353,13 @@ static void reclaim(gov_t *g, slim_gov_pass *r) {
     }
 }
 
-/* Growth of the file pages of the cgroups reclaimed last time (kB); -1 if unknown. */
+/* Growth of the MAPPED file pages (memory.stat file_mapped, what iso counts) of the cgroups
+ * reclaimed last time, in kB; -1 if unknown. Plain "file" would mostly measure readahead around
+ * refaults: cache that is charged to the browser but not mapped, and cheap to drop later. */
 static long file_growth(gov_t *g) {
     if (!g->nok) return -1;
     long s = 0;
-    for (int i = 0; i < g->nok; i++) { long v = cg_file_kb(g->okcg[i]); if (v < 0) return -1; s += v; }
+    for (int i = 0; i < g->nok; i++) { long v = stat_kb(g->okcg[i], "file_mapped"); if (v < 0) return -1; s += v; }
     return s - g->post_kb;
 }
 
@@ -704,6 +707,7 @@ void slim_gov_defaults(slim_gov_cfg *g) {
     double d;
     if (c && *c && !parse_double(c, &d) && d > 0 && d <= 10000) g->idle_cpu = d;
     g->out_fd = g->log_fd = -1;
+    g->measure = (int)envl("SLIM_GOV_MEASURE", 0, 0, 1);
     const char *lf = getenv("SLIM_GOV_LOG");
     if (lf && *lf) g->log_fd = open(lf, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
 }

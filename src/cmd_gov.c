@@ -68,7 +68,7 @@ int cmd_gov(ctx_t *c, int argc, char **argv) {
     if (kill(root, 0) && !daemon) return slim_seterr("browser pid %d is not running", root);
     g.root = root;
     g.wait_engine = wait_engine;
-    if (daemon) { g.out_fd = -1; g.measure = g.log_fd >= 0; }
+    if (daemon) g.out_fd = -1;
     else { g.out_fd = once ? -1 : 1; g.json = c->json; g.measure = 1; }
     if (once) {
         slim_gov_pass r;
