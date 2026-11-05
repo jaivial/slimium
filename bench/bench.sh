@@ -2,6 +2,7 @@
 # slimium RAM benchmark: same engine, same workload, different flag sets.
 #
 #   bench.sh run   CONFIG WORKLOAD [REPS]   measure; appends JSON lines to results/raw.jsonl
+#   bench.sh ab    CFG_A CFG_B WORKLOAD [PAIRS]  alternate A,B,A,B... (cancels drift/noise)
 #   bench.sh smoke CONFIG                   functional smoke check; appends to results/smoke.jsonl
 #   bench.sh args  CONFIG                   print the argv a config launches
 #
@@ -122,13 +123,16 @@ open_workload() {   # $1 A|B ; opens every URL as a tab, waits for loads, then S
   sleep "$SETTLE"
 }
 
-sample() {   # -> one JSON object of the median-PSS sample, with all samples
+# Metric: iso_kb (isolated footprint = Pss_Anon + Pss_Shmem + union of resident
+# file pages, src/mem.c). PSS alone is distorted by the other Chromium
+# processes on the machine that share our file pages.
+sample() {   # -> one JSON object of the median-iso sample, with all samples
   local -a s=()
   for i in $(seq "$SAMPLES"); do
     s+=("$("$BIN/slim-memstat" --json --crashpad $BPID)")
     [ "$i" -lt "$SAMPLES" ] && sleep 2
   done
-  printf '%s\n' "${s[@]}" | jq -sc 'sort_by(.pss_kb) as $s | $s[(($s|length)/2|floor)] + {samples: [ $s[].pss_kb ]}'
+  printf '%s\n' "${s[@]}" | jq -sc 'sort_by(.iso_kb) as $s | $s[(($s|length)/2|floor)] + {samples: [ $s[].iso_kb ]}'
 }
 
 titles_json() {
@@ -136,21 +140,21 @@ titles_json() {
 }
 
 cmd_run() {
-  local cfg=$1 w=$2 reps=${3:-3}
-  for r in $(seq "$reps"); do
+  local cfg=$1 w=$2 reps=${3:-3} r0=${REP0:-0}
+  for r in $(seq $((r0 + 1)) $((r0 + reps))); do
     launch "$cfg" || { echo "{\"config\":\"$cfg\",\"workload\":\"$w\",\"error\":\"launch\"}" >> "$RES/raw.jsonl"; continue; }
     open_workload "$w"
     local m titles breakdown
     m=$(sample)
     titles=$(titles_json)
-    breakdown=$("$BIN/slim-memstat" --json -v --crashpad $BPID | jq -sc '[.[] | select(.type) | {type, pss_kb}] | group_by(.type) | map({type: .[0].type, n: length, pss_kb: (map(.pss_kb) | add)})')
+    breakdown=$("$BIN/slim-memstat" --json -v --crashpad $BPID | jq -sc '[.[] | select(.type)] | group_by(.type) | map({type: .[0].type, n: length, iso_kb: (map(.iso_kb) | add), anon_kb: (map(.anon_kb) | add), pss_kb: (map(.pss_kb) | add)})')
     stop
     local line
     line=$(jq -cn --arg c "$(basename "$cfg")" --arg w "$w" --arg e "$CFG_ENGINE" --arg tag "$TAG" --argjson r "$r" \
       --argjson m "$m" --argjson t "$titles" --argjson b "$breakdown" --argjson load "$LOAD_S" \
       '{config:$c, workload:$w, rep:$r, engine:$e, tag:$tag, date:(now|todate), load_s:$load} + $m + {titles:$t, by_type:$b}')
     echo "$line" >> "$RES/raw.jsonl"
-    echo "$line" | jq -r '"\(.config) \(.workload)#\(.rep): pss \(.pss_kb/1024|floor) MB procs \(.procs) tabs \(.titles|length) load \(.load_s)s"'
+    echo "$line" | jq -r '"\(.config) \(.workload)#\(.rep): iso \(.iso_kb/1024|floor) MB anon \(.anon_kb/1024|floor) pss \(.pss_kb/1024|floor) procs \(.procs) tabs \(.titles|length) load \(.load_s)s"'
   done
 }
 
@@ -225,6 +229,8 @@ cmd_smoke() {
 
 case "${1:-}" in
   run) shift; [ $# -ge 2 ] || die "usage: bench.sh run CONFIG A|B [REPS]"; cmd_run "$@" ;;
+  ab) shift; [ $# -ge 3 ] || die "usage: bench.sh ab CFG_A CFG_B A|B [PAIRS]"
+      for p in $(seq "${4:-3}"); do REP0=$((p - 1)) cmd_run "$1" "$3" 1; REP0=$((p - 1)) cmd_run "$2" "$3" 1; done ;;
   smoke) shift; [ $# -ge 1 ] || die "usage: bench.sh smoke CONFIG"; cmd_smoke "$1" ;;
   args) shift; config_args "$1" /tmp/UDD; echo "engine: $CFG_ENGINE" ;;
   *) sed -n '2,14p' "$0"; exit 2 ;;

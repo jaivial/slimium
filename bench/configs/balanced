@@ -1,0 +1,3 @@
+# stock argv + slimium balanced profile, merged by src/profile.c
+@merge balanced
+--no-first-run

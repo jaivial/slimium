@@ -1,0 +1,3 @@
+# stock argv + slimium max profile, merged by src/profile.c
+@merge max
+--no-first-run

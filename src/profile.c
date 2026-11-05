@@ -4,42 +4,36 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Shared by both levels (measured, see docs/PROFILE.md). No GPU switch: keeping
+ * the (SwiftShader) GPU process is both cheaper than --disable-gpu /
+ * --in-process-gpu and keeps WebGL and stock-identical screenshots. */
+#define SLIM_COMMON \
+    "--renderer-process-limit=1", \
+    "--process-per-site", \
+    "--disable-site-isolation-trials", \
+    "--disable-component-extensions-with-background-pages", \
+    "--disable-extensions", \
+    "--disable-background-networking", \
+    "--disable-component-update", \
+    "--disable-default-apps", \
+    "--disable-sync", \
+    "--disable-breakpad", \
+    "--no-first-run", \
+    "--disable-features=IsolateOrigins,site-per-process,WebUIOmniboxPopup,WebUIOmniboxAimPopup," \
+    "Translate,OptimizationHints,OptimizationGuideModelDownloading,OptimizationHintsFetching," \
+    "OptimizationTargetPrediction,MediaRouter,DialMediaRouteProvider,AutofillServerCommunication," \
+    "CertificateTransparencyComponentUpdater,InterestFeedContentSuggestions,CalculateNativeWinOcclusion," \
+    "HeavyAdIntervention,LensOverlay,BackForwardCache,SpareRendererForSitePerProcess", \
+    "--enable-features=NetworkServiceInProcess2"
+
 static const char *const balanced[] = {
-    "--renderer-process-limit=1",
-    "--process-per-site",
-    "--disable-site-isolation-trials",
-    "--disable-features=IsolateOrigins,site-per-process,Translate,OptimizationHints,MediaRouter,"
-    "BackForwardCache,InterestFeedContentSuggestions,CalculateNativeWinOcclusion,AutofillServerCommunication",
-    "--enable-low-end-device-mode",
-    "--disable-gpu",
-    "--disable-extensions",
-    "--disable-component-extensions-with-background-pages",
-    "--disable-background-networking",
-    "--disable-default-apps",
-    "--disable-sync",
-    "--no-first-run",
-    "--disable-breakpad",
-    "--js-flags=--max-lazy",
+    SLIM_COMMON,
+    "--js-flags=--lite-mode",
     NULL};
 
 static const char *const max_[] = {
-    "--renderer-process-limit=1",
-    "--process-per-site",
-    "--disable-site-isolation-trials",
-    "--disable-features=IsolateOrigins,site-per-process,Translate,OptimizationHints,MediaRouter,"
-    "BackForwardCache,InterestFeedContentSuggestions,CalculateNativeWinOcclusion,AutofillServerCommunication",
-    "--enable-features=NetworkServiceInProcess2",
-    "--in-process-gpu",
-    "--enable-low-end-device-mode",
-    "--disable-gpu",
-    "--disable-extensions",
-    "--disable-component-extensions-with-background-pages",
-    "--disable-background-networking",
-    "--disable-default-apps",
-    "--disable-sync",
-    "--no-first-run",
-    "--disable-breakpad",
-    "--js-flags=--max-lazy --optimize-for-size",
+    SLIM_COMMON,
+    "--js-flags=--lite-mode --max-lazy --optimize-for-size --max-semi-space-size=1 --single-threaded-gc",
     NULL};
 
 int slim_profile_parse(const char *s) {

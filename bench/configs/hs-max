@@ -1,0 +1,5 @@
+# chrome-headless-shell 1248 (Chromium 156) + max
+@engine /home/jaime/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell
+@merge max
+--headless
+--no-first-run

@@ -21,7 +21,7 @@ cfg=$1 w=${2:-A}
 launch "$cfg" || exit 1
 open_workload "$w"
 declare -A M
-step() { M[$1]=$(sample); echo "$1: $(echo "${M[$1]}" | jq -r '"pss \(.pss_kb/1024|floor) MB uss \(.uss_kb/1024|floor) MB procs \(.procs)"')" >&2; }
+step() { M[$1]=$(sample); echo "$1: $(echo "${M[$1]}" | jq -r '"iso \(.iso_kb/1024|floor) MB anon \(.anon_kb/1024|floor) pss \(.pss_kb/1024|floor) procs \(.procs)"')" >&2; }
 each_page() { local ws; for ws in $(page_ws); do "$BIN/slim-cdp" -t 10 "$ws" "$@" >/dev/null 2>&1; done; }
 bg_targets() { curl -s "http://127.0.0.1:$PORT/json/list" | jq -r '[.[] | select(.type=="page")] | .[1:][] | .id'; }
 pressure() {
@@ -54,4 +54,4 @@ jq -cn --arg c "$(basename "$cfg")" --arg w "$w" --argjson ok $ok --argjson n $n
   --argjson fr "${M[freeze]}" --argjson mi "${M[minimize]}" --argjson mp "${M[min+press]}" --argjson la "${M[later]}" \
   '{config:$c, workload:$w, date:(now|todate), resume_ok:"\($ok)/\($n)",
     steps: ([["base",$base],["gc",$gc],["pressure",$pr],["freeze",$fr],["minimize",$mi],["min+press",$mp],["later",$la]]
-            | map({step:.[0], pss_kb:.[1].pss_kb, uss_kb:.[1].uss_kb, procs:.[1].procs}))}' | tee -a "$RES/governor.jsonl"
+            | map({step:.[0], iso_kb:.[1].iso_kb, anon_kb:.[1].anon_kb, pss_kb:.[1].pss_kb, uss_kb:.[1].uss_kb, procs:.[1].procs}))}' | tee -a "$RES/governor.jsonl"
