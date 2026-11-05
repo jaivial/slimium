@@ -1,0 +1,9 @@
++ T=batch9
++ TAG=batch9
++ ./bench.sh ab balanced max A 3
+balanced A#1: iso 649 MB anon 388 pss 459 procs 9 tabs 7 load 3s
+max A#1: iso 633 MB anon 372 pss 441 procs 9 tabs 7 load 3s
+balanced A#2: iso 697 MB anon 434 pss 505 procs 9 tabs 7 load 3s
+max A#2: iso 684 MB anon 424 pss 493 procs 9 tabs 7 load 3s
+balanced A#3: iso 647 MB anon 385 pss 455 procs 9 tabs 7 load 2s
+max A#3: iso 686 MB anon 424 pss 527 procs 9 tabs 7 load 2s

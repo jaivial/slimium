@@ -17,10 +17,16 @@ engine's file pages, which makes PSS swing by ±40 MB between identical runs.
 
 | level | what | workload A iso (ELF) | vs stock ELF |
 |---|---|---|---|
-| off | caller's argv untouched | 900-920 MB (stock) | 1.00x |
-| balanced | all safe switches below | ~657 MB | **0.72x** |
-| max | balanced + PartitionAlloc hardening off + V8 lite mode | ~634 MB | **0.70x** |
-| balanced on chrome-headless-shell | same switches, CfT headless shell engine | ~476 MB | **0.52x** |
+| off | caller's argv untouched | 901-952 MB (stock, median 914) | 1.00x |
+| balanced | all safe switches below | 643-647 MB | **0.70x** |
+| max | balanced + PartitionAlloc hardening off | 633-686 MB (bimodal; -14 MB vs balanced in the same mode, ABAB) | 0.69x (low mode) |
+| balanced on chrome-headless-shell (opt-in engine) | same switches | 475-476 MB | **0.52x** |
+| max on chrome-headless-shell | | 467-468 MB | 0.51x |
+
+Workload B (real sites): stock 838, balanced 624 (0.74x), max 606 (0.72x), hs-balanced 540-559 (0.64-0.67x).
+All levels: 0.0% screenshot difference vs stock on the ELF (incl. WebGL); smoke PASS incl. the
+56-tab background-eval check. Through cu (`CU_BROWSER=slimium-chrome`, cu's own argv merged):
+650-698 MB vs 779-790 for cu's own flags (0.82-0.88x of cu, 0.71-0.76x of stock).
 
 Flags alone top out at ~0.70x on the Fedora ELF for content-heavy pages: after the
 process model is collapsed, ~75% of what is left is the pages' own live data in
@@ -41,23 +47,22 @@ see docs/RESEARCH-structural.md).
 | `--disable-extensions`, `--disable-background-networking`, `--disable-component-update`, `--disable-default-apps`, `--disable-sync`, `--disable-breakpad` | Fedora's chromium installs an external extension (GNOME connector) that spawns an extension renderer plus a python3 native host (16 MB) | ~-30 MB PSS (noisy); stops background traffic |
 | `--disable-features=Translate,OptimizationHints,OptimizationGuideModelDownloading,OptimizationHintsFetching,OptimizationTargetPrediction,MediaRouter,DialMediaRouteProvider,AutofillServerCommunication,CertificateTransparencyComponentUpdater,InterestFeedContentSuggestions,CalculateNativeWinOcclusion,HeavyAdIntervention,LensOverlay` | background services and model downloads | ~-30 to -40 MB PSS together (noisy; structural research found ~-2 MB for ~40 browser features on an idle-ish tree — kept for the traffic) |
 | `--disable-features=BackForwardCache,SpareRendererForSitePerProcess` | no cached pages / spare renderers kept alive | ~0 on A (single navigation per tab); saves a renderer per navigated tab in long sessions |
-| `--enable-low-end-device-mode` | smaller Blink/cc caches, more aggressive GC | ~0 on A, -21 MB on the 13-tab cu-like set (research); 0.0% pixel diff |
 | `--enable-features=PartitionAllocMemoryReclaimer,PartitionAllocUseDenserDistribution,PartitionAllocSortActiveSlotSpans,PartitionAllocStraightenLargerSlotSpanFreeLists,PartitionAllocSortSmallerSlotSpanFreeLists,MemoryPurgeInBackground,MemoryPurgeOnFreeze` | allocator packing and reclaim; no security cost | a few MB (research, combined with the hardening knobs: -8 MB) |
-| `--js-flags=--max-semi-space-size=1` | 1 MB young generation per isolate | part of research BEST (-32 MB with low-end + PA); ~0 alone on A |
+| `--js-flags=--max-semi-space-size=1 --lite-mode` | lite mode: no optimizing JIT, lazy feedback vectors, smaller V8 heaps; 1 MB young generation per isolate | **-120 MB iso** on A (balanced without it: 766-775, with it: 643-647); caveat: CPU-bound JS ~2.5-4x slower (`bench/www/jsperf.html`: 142-226 ms stock vs 555-647 ms), page loads unchanged in the benchmark |
 | `--no-first-run` | no first-run UI | - |
 
 max adds:
 
 | switch | why | caveat |
 |---|---|---|
-| `--disable-features=PartitionAllocBackupRefPtr,PartitionAllocSchedulerLoopQuarantine,PartitionAllocLargeThreadCacheSize,PartitionAllocEventuallyZeroFreedMemory,GwpAsanMalloc,GwpAsanPartitionAlloc,PartitionAllocLargeEmptySlotSpanRing,PartitionAllocAdjustSizeWhenInForeground` | removes per-allocation hardening overhead and quarantined frees | **security**: weakens use-after-free mitigation |
-| `--js-flags=... --lite-mode` | no optimizing JIT, no feedback vectors: smaller V8 heaps | ~-25 MB PSS on A; JS-heavy pages run slower |
+| `--disable-features=PartitionAllocBackupRefPtr,PartitionAllocSchedulerLoopQuarantine,PartitionAllocLargeThreadCacheSize,PartitionAllocEventuallyZeroFreedMemory,GwpAsanMalloc,GwpAsanPartitionAlloc,PartitionAllocLargeEmptySlotSpanRing,PartitionAllocAdjustSizeWhenInForeground` | removes per-allocation hardening overhead and quarantined frees | -8 MB (headless shell 476 -> 468; research -8 on the cu set); **security**: weakens use-after-free mitigation |
 
 ## Rejected (measured)
 
 | candidate | result |
 |---|---|
 | `--disable-gpu`, `--in-process-gpu`, `--disable-software-rasterizer`, `--disable-gpu-compositing`, `--use-gl=disabled`, `--use-angle=disabled`, Vulkan/SkiaGraphite off | the GPU process stays (only `--in-process-gpu` removes it); `--in-process-gpu --disable-gpu` was **+25 MB** PSS vs keeping the GPU process; iso: `--disable-gpu` ±0, `--in-process-gpu` +20..+80. `--disable-gpu` also loses WebGL (fidelity). cu's own `--disable-gpu` is left alone: removing it changed nothing (654 vs 653 MB) |
+| `--enable-low-end-device-mode` | -21 MB on the cu set (research; mostly because it turns on V8 lite mode) but it **freezes background tabs**: with workload A + 50 tabs open, `Runtime.evaluate` on the 8 oldest tabs hangs (20 s timeout). cu evaluates in background tabs — **rejected**; the smoke check now tests this permanently |
 | `--single-process` | -150 MB PSS but breaks `Target.createBrowserContext` (the browser dies; cu track: 53/71) — **forbidden** |
 | `--no-zygote` (+`--no-sandbox`) | **+200 MB** PSS (962 vs 750): every renderer is exec'd fresh and loses the zygote's copy-on-write base |
 | `--no-sandbox` | ±0 |

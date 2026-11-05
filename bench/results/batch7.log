@@ -2,3 +2,91 @@
 + make -s -B -C . all
 + for c in balanced max hs-balanced cu+balanced
 + ./bench.sh smoke balanced
+{"config":"balanced","engine":"/usr/lib64/chromium-browser/chromium-browser","date":"2026-11-05T20:46:02Z","smoke":"pass","shot_b64":44660,"tabs56":{"procs":10,"pss_kb":1050608,"rss_kb":1704728,"uss_kb":894480,"anon_kb":919913,"shmem_kb":21277,"file_kb":109413,"file_union_kb":265752,"iso_kb":1206942,"swap_kb":0}}
++ for c in balanced max hs-balanced cu+balanced
++ ./bench.sh smoke max
+{"config":"max","engine":"/usr/lib64/chromium-browser/chromium-browser","date":"2026-11-05T20:46:26Z","smoke":"pass","shot_b64":44660,"tabs56":{"procs":10,"pss_kb":1041876,"rss_kb":1689444,"uss_kb":883840,"anon_kb":906204,"shmem_kb":20345,"file_kb":115318,"file_union_kb":265924,"iso_kb":1192473,"swap_kb":0}}
++ for c in balanced max hs-balanced cu+balanced
++ ./bench.sh smoke hs-balanced
+{"config":"hs-balanced","engine":"/home/jaime/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell","date":"2026-11-05T20:46:50Z","smoke":"pass","shot_b64":53964,"tabs56":{"procs":7,"pss_kb":1364602,"rss_kb":1871900,"uss_kb":1039032,"anon_kb":976410,"shmem_kb":264064,"file_kb":124126,"file_union_kb":134792,"iso_kb":1375266,"swap_kb":0}}
++ for c in balanced max hs-balanced cu+balanced
++ ./bench.sh smoke cu+balanced
+{"config":"cu+balanced","engine":"/usr/lib64/chromium-browser/chromium-browser","date":"2026-11-05T20:47:14Z","smoke":"pass","shot_b64":44660,"tabs56":{"procs":10,"pss_kb":1064979,"rss_kb":1714052,"uss_kb":909856,"anon_kb":932088,"shmem_kb":22993,"file_kb":109891,"file_union_kb":264192,"iso_kb":1219273,"swap_kb":0}}
++ T=batch7
++ TAG=batch7
++ ./bench.sh ab stock balanced A 3
+stock A#1: iso 902 MB anon 611 pss 770 procs 21 tabs 7 load 6s
+balanced A#1: iso 647 MB anon 387 pss 487 procs 9 tabs 7 load 3s
+stock A#2: iso 914 MB anon 621 pss 782 procs 22 tabs 7 load 1s
+balanced A#2: iso 646 MB anon 386 pss 486 procs 9 tabs 7 load 3s
+stock A#3: iso 904 MB anon 612 pss 771 procs 21 tabs 7 load 6s
+balanced A#3: iso 643 MB anon 384 pss 483 procs 9 tabs 7 load 3s
++ TAG=batch7
++ ./bench.sh ab stock max A 3
+stock A#1: iso 917 MB anon 617 pss 786 procs 22 tabs 7 load 2s
+max A#1: iso 684 MB anon 424 pss 523 procs 9 tabs 7 load 3s
+stock A#2: iso 921 MB anon 622 pss 788 procs 22 tabs 7 load 1s
+max A#2: iso 639 MB anon 377 pss 476 procs 9 tabs 7 load 3s
+stock A#3: iso 904 MB anon 617 pss 774 procs 22 tabs 7 load 2s
+max A#3: iso 684 MB anon 424 pss 523 procs 9 tabs 7 load 3s
++ TAG=batch7
++ ./bench.sh ab stock hs-balanced A 3
+stock A#1: iso 952 MB anon 653 pss 819 procs 21 tabs 7 load 7s
+hs-balanced A#1: iso 475 MB anon 326 pss 463 procs 6 tabs 7 load 3s
+stock A#2: iso 915 MB anon 616 pss 747 procs 22 tabs 7 load 0s
+hs-balanced A#2: iso 476 MB anon 328 pss 465 procs 6 tabs 7 load 3s
+stock A#3: iso 901 MB anon 610 pss 735 procs 21 tabs 7 load 6s
+hs-balanced A#3: iso 476 MB anon 328 pss 465 procs 6 tabs 7 load 2s
++ TAG=batch7
++ ./bench.sh run hs-max A 2
+hs-max A#1: iso 468 MB anon 319 pss 457 procs 6 tabs 7 load 3s
+hs-max A#2: iso 467 MB anon 318 pss 456 procs 6 tabs 7 load 2s
++ TAG=batch7
++ ./bench.sh run hs-stock A 2
+hs-stock A#1: iso 636 MB anon 478 pss 625 procs 13 tabs 7 load 2s
+hs-stock A#2: iso 635 MB anon 478 pss 624 procs 13 tabs 7 load 2s
++ TAG=batch7
++ ./bench.sh run stock-script A 2
+stock-script A#1: iso 912 MB anon 613 pss 745 procs 23 tabs 7 load 8s
+stock-script A#2: iso 912 MB anon 621 pss 745 procs 24 tabs 7 load 1s
++ TAG=batch7
++ ./bench.sh ab cu cu+balanced A 2
+cu A#1: iso 790 MB anon 503 pss 608 procs 13 tabs 7 load 2s
+cu+balanced A#1: iso 650 MB anon 386 pss 455 procs 9 tabs 7 load 2s
+cu A#2: iso 779 MB anon 503 pss 600 procs 13 tabs 7 load 2s
+cu+balanced A#2: iso 698 MB anon 435 pss 501 procs 9 tabs 7 load 2s
++ TAG=batch7
++ ./bench.sh run cu-hs+balanced A 2
+cu-hs+balanced A#1: iso 477 MB anon 328 pss 465 procs 6 tabs 7 load 3s
+cu-hs+balanced A#2: iso 475 MB anon 329 pss 464 procs 6 tabs 7 load 3s
++ for c in balanced hs-balanced
++ ./fidelity.sh balanced
+{"config":"balanced","fidelity":"pass","pages":{"text":0.0,"images":0.0,"canvas":0.0,"canvas-clip":0.0,"svg":0.0,"css":0.0,"webgl":0.0,"long-full":0.0,"wikipedia":0.0}}
++ for c in balanced hs-balanced
++ ./fidelity.sh hs-balanced
+{"config":"hs-balanced","fidelity":"pass","pages":{"text":0.596,"images":0.0,"canvas":0.0,"canvas-clip":0.0,"svg":0.0,"css":0.0,"webgl":0.0,"long-full":0.0,"wikipedia":0.0}}
++ TAG=batch7
++ ./bench.sh ab stock balanced B 2
+stock B#1: iso 838 MB anon 526 pss 707 procs 22 tabs 7 load 19s
+balanced B#1: iso 624 MB anon 334 pss 465 procs 10 tabs 7 load 6s
+stock B#2: iso 846 MB anon 535 pss 717 procs 23 tabs 7 load 2s
+balanced B#2: iso 457 MB anon 190 pss 294 procs 9 tabs 7 load 1s
++ TAG=batch7
++ ./bench.sh ab stock hs-balanced B 2
+stock B#1: iso 825 MB anon 514 pss 698 procs 22 tabs 7 load 4s
+hs-balanced B#1: iso 559 MB anon 332 pss 540 procs 6 tabs 7 load 1s
+stock B#2: iso 848 MB anon 534 pss 722 procs 23 tabs 7 load 1s
+hs-balanced B#2: iso 540 MB anon 334 pss 522 procs 6 tabs 7 load 4s
++ TAG=batch7
++ ./bench.sh ab cu cu+balanced B 1
+cu B#1: iso 981 MB anon 660 pss 839 procs 14 tabs 7 load 22s
+cu+balanced B#1: iso 827 MB anon 517 pss 636 procs 11 tabs 7 load 29s
++ ./governor.sh balanced A
+base: iso 698 MB anon 436 pss 508 procs 9
+gc: iso 640 MB anon 378 pss 450 procs 9
+pressure: iso 637 MB anon 375 pss 447 procs 9
+freeze: iso 637 MB anon 375 pss 447 procs 9
+minimize: iso 637 MB anon 375 pss 447 procs 9
+min+press: iso 629 MB anon 367 pss 439 procs 9
+later: iso 628 MB anon 367 pss 439 procs 9
+{"config":"balanced","workload":"A","date":"2026-11-05T21:03:31Z","resume_ok":"7/7","steps":[{"step":"base","iso_kb":714980,"anon_kb":446672,"pss_kb":521184,"uss_kb":414036,"procs":9},{"step":"gc","iso_kb":655452,"anon_kb":387372,"pss_kb":461443,"uss_kb":354504,"procs":9},{"step":"pressure","iso_kb":652704,"anon_kb":384444,"pss_kb":458279,"uss_kb":351576,"procs":9},{"step":"freeze","iso_kb":652760,"anon_kb":384500,"pss_kb":458637,"uss_kb":351632,"procs":9},{"step":"minimize","iso_kb":652504,"anon_kb":384508,"pss_kb":458379,"uss_kb":351376,"procs":9},{"step":"min+press","iso_kb":644480,"anon_kb":376484,"pss_kb":450310,"uss_kb":343348,"procs":9},{"step":"later","iso_kb":644018,"anon_kb":376018,"pss_kb":449878,"uss_kb":342892,"procs":9}]}

@@ -112,11 +112,16 @@ open_workload() {   # $1 A|B ; opens every URL as a tab, waits for loads, then S
   local w=$1 urls limit=20
   [ "$w" = A ] && { start_httpd; urls=$(url_A); } || { urls=$(url_B); limit=45; }
   for u in $urls; do curl -s -o /dev/null -X PUT "http://127.0.0.1:$PORT/json/new?$u"; done
-  local t0=$SECONDS ws n ok
+  # Loaded = every opened URL has left about:blank and is readyState complete
+  # (a tab whose navigation has not committed yet still shows a complete
+  # about:blank document).
+  local t0=$SECONDS ws ok want; want=$(echo $urls | wc -w)
   while [ $((SECONDS - t0)) -lt $limit ]; do
-    n=0 ok=0
-    for ws in $(page_ws); do n=$((n+1)); [ "$(eval_ws "$ws" document.readyState)" = complete ] && ok=$((ok+1)); done
-    [ $ok -ge $n ] && [ $n -gt 6 ] && break
+    ok=0
+    for ws in $(page_ws); do
+      [ "$(eval_ws "$ws" 'location.href=="about:blank"?"blank":document.readyState')" = complete ] && ok=$((ok+1))
+    done
+    [ $ok -ge $want ] && break
     sleep 1
   done
   LOAD_S=$((SECONDS - t0))
