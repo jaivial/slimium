@@ -1,5 +1,6 @@
 /* Memory reporting/purging and raw DevTools passthrough. */
 #include "cmd.h"
+#include "gov.h"
 #include "mem.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,7 +57,15 @@ static void mem_line(ctx_t *c, int pid, const char *prefix) {
         snprintf(k, sizeof k, "%spss_kb", prefix); out_i(c, k, m.pss_kb);
         snprintf(k, sizeof k, "%srss_kb", prefix); out_i(c, k, m.rss_kb);
         snprintf(k, sizeof k, "%suss_kb", prefix); out_i(c, k, m.uss_kb);
-        out_t(c, "%sbrowser pid %d procs %d pss %ld KB rss %ld KB uss %ld KB", prefix, pid, m.procs, m.pss_kb, m.rss_kb, m.uss_kb);
+        snprintf(k, sizeof k, "%siso_kb", prefix); out_i(c, k, m.iso_kb);
+        snprintf(k, sizeof k, "%sanon_kb", prefix); out_i(c, k, m.anon_kb);
+        snprintf(k, sizeof k, "%sshmem_kb", prefix); out_i(c, k, m.shmem_kb);
+        snprintf(k, sizeof k, "%sfile_union_kb", prefix); out_i(c, k, m.file_union_kb);
+        pid_t gp = slim_gov_find(pid);
+        snprintf(k, sizeof k, "%sgovernor", prefix); out_i(c, k, gp);
+        out_t(c, "%sbrowser pid %d procs %d pss %ld KB rss %ld KB uss %ld KB | iso %ld KB = anon %ld + shmem %ld + file_union %ld KB | governor %s%d",
+              prefix, pid, m.procs, m.pss_kb, m.rss_kb, m.uss_kb, m.iso_kb, m.anon_kb, m.shmem_kb, m.file_union_kb,
+              gp ? "pid " : "", (int)gp);
     } else out_t(c, "%sbrowser pid %d (memory unavailable)", prefix, pid);
 }
 

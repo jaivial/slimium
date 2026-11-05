@@ -9,9 +9,10 @@
 static int cmd_help(ctx_t *c, int argc, char **argv);
 static int cmd_version(ctx_t *c, int argc, char **argv);
 static int cmd_batch(ctx_t *c, int argc, char **argv);
+int cmd_gov(ctx_t *c, int argc, char **argv); /* src/cmd_gov.c */
 
 static const cmd_def CMDS[] = {
-    {"start", cmd_start, CF_NOBATCH, "[--profile off|balanced|max] [--headful] [--user-data-dir D] [--engine PATH] [--window WxH] [-- ENGINE_ARGS]  launch a browser session"},
+    {"start", cmd_start, CF_NOBATCH, "[--profile off|balanced|max] [--headful] [--user-data-dir D] [--engine PATH] [--window WxH] [--no-gov] [-- ENGINE_ARGS]  launch a browser session (+ memory governor)"},
     {"stop", cmd_stop, CF_NOBATCH, "stop the session's browser (attached sessions are only forgotten)"},
     {"status", cmd_status, 0, "alive, pid, port, tabs, memory"},
     {"attach", cmd_attach, CF_NOBATCH, "--port N  adopt an existing CDP browser as a session"},
@@ -57,6 +58,7 @@ static const cmd_def CMDS[] = {
     {"console", cmd_console, 0, "collect console messages for --timeout MS (default 1000)"},
     {"mem", cmd_mem, 0, "browser process-tree memory + per-tab JS heap"},
     {"purge", cmd_purge, 0, "GC every tab + critical memory pressure"},
+    {"gov", cmd_gov, CF_NOBATCH, "[--once] [--pid P] [--reclaim-s N] [--idle-ms N] [--idle-cpu PCT] [--hibernate K] [--no-gc]  memory governor (foreground)"},
     {"freeze", cmd_freeze, 0, "[ID]  freeze a tab"},
     {"thaw", cmd_thaw, 0, "[ID]  unfreeze a tab"},
     {"context-new", cmd_context_new, 0, "[--url URL]  new isolated browser context"},
@@ -78,7 +80,9 @@ static int cmd_help(ctx_t *c, int argc, char **argv) {
              "  --tab ID, --json (one JSON object per line), --timeout MS (default 30000)\n\ncommands:\n", SLIM_VERSION);
     for (size_t i = 0; i < NCMDS; i++) out_t(c, "  %-14s %s\n", CMDS[i].name, CMDS[i].help);
     out_t(c, "\nwrapper: invoked as 'slimium-chrome' (or 'slimium chrome ...') it execs the engine\n"
-             "  (env SLIM_CHROMIUM, SLIM_PROFILE=off|balanced|max, SLIM_WRAPPER_LOG=FILE).\n"
+             "  (env SLIM_CHROMIUM, SLIM_PROFILE=off|balanced|max, SLIM_WRAPPER_LOG=FILE) in its own systemd\n"
+             "  scope (SLIM_SCOPE=0: no scope) with a detached memory governor (SLIM_GOV=0: none; SLIM_GOV_LOG=FILE,\n"
+             "  SLIM_GOV_IDLE_MS, SLIM_GOV_IDLE_CPU, SLIM_GOV_RECLAIM_S, SLIM_GOV_GC, SLIM_GOV_HIBERNATE=K, SLIM_GOV_FADVISE).\n"
              "exit codes: 0 ok, 1 error, 2 usage");
     if (c->json) { sb_reset(&c->oj); out_s(c, "version", SLIM_VERSION); }
     return 0;

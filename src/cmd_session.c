@@ -1,5 +1,6 @@
 /* Session lifecycle (start/stop/status/attach/sessions) and the slimium-chrome wrapper. */
 #include "cmd.h"
+#include "gov.h"
 #include "mem.h"
 #include "profile.h"
 #include <arpa/inet.h>
@@ -92,6 +93,9 @@ int wrapper_main(int argc, char **argv) {
         if (!strcmp(argv[i], "--version") || !strcmp(argv[i], "-version") || !strcmp(argv[i], "--product-version")) ver = 1;
     char *engine = slim_find_engine(NULL, !ver);
     if (!engine) { fprintf(stderr, "slimium-chrome: %s\n", slim_errmsg()); return 127; }
+    const char *gv = getenv("SLIM_GOV");
+    int gov = !ver && !(gv && !strcmp(gv, "0"));
+    if (gov) { char *pe = slim_engine_private(engine); if (pe) { free(engine); engine = pe; } }
     char **av;
     if (ver) {
         av = xmalloc(sizeof *av * (size_t)(argc + 1));
@@ -109,6 +113,15 @@ int wrapper_main(int argc, char **argv) {
         if (!av) { fprintf(stderr, "slimium-chrome: out of memory\n"); return 127; }
     }
     log_argv(av);
+    if (gov) {
+        /* own the page cache, fork the detached governor, then exec in a scope keeping this pid */
+        const char *udd = NULL;
+        int port = slim_gov_argv_port(argc - 1, argv + 1, &udd);
+        slim_engine_fadvise(engine);
+        slim_gov_spawn(getpid(), port, udd, 1);
+        char **sv = slim_scope_argv(av, getpid());
+        if (sv) { execv(sv[0], sv); free(sv); }   /* systemd-run gone? run unscoped */
+    }
     execv(engine, av);
     fprintf(stderr, "slimium-chrome: exec %s: %s\n", engine, strerror(errno));
     return 127;
@@ -171,6 +184,10 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
     const char *udd = opt_val(c, &argc, argv, "--user-data-dir");
     const char *eng = opt_val(c, &argc, argv, "--engine");
     const char *win = opt_val(c, &argc, argv, "--window");
+    int gov_on = opt_flag(&argc, argv, "--gov");
+    int gov_off = opt_flag(&argc, argv, "--no-gov");
+    const char *genv = getenv("SLIM_GOV");
+    gov_on = !gov_off && (gov_on || !(genv && !strcmp(genv, "0")));
     if (opt_done(c, &argc, argv)) return -1;
     if (!prof) prof = getenv("SLIM_PROFILE");
     if (!prof || !*prof) prof = "balanced";
@@ -203,6 +220,7 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
 
     char *engine = slim_find_engine(eng, 1);
     if (!engine) return -1;
+    if (gov_on) { char *pe = slim_engine_private(engine); if (pe) { free(engine); engine = pe; } }
 
     sbuf ud = {0};
     if (udd) sb_puts(&ud, udd);
@@ -239,6 +257,7 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
     char **av = slim_profile_merge_argv(level, engine, n, args);
     if (!av) { free(args); free(engine); return slim_seterr("out of memory"); }
 
+    if (gov_on) slim_engine_fadvise(engine);
     pid_t pid = fork();
     if (pid < 0) { free(av); free(args); free(engine); return slim_seterr("fork: %s", strerror(errno)); }
     if (pid == 0) {
@@ -249,6 +268,8 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
         if (lf >= 0) { dup2(lf, 1); dup2(lf, 2); }
         else if (nul >= 0) { dup2(nul, 1); dup2(nul, 2); }
         closefrom(3);
+        char **sv = gov_on ? slim_scope_argv(av, getpid()) : NULL;
+        if (sv) execv(sv[0], sv);
         execv(engine, av);
         _exit(127);
     }
@@ -283,7 +304,10 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
     s.log = xstrdup(logp);
     int r = state_save(&s);
     if (r) { kill(-pid, SIGTERM); state_free(&s); return -1; }
+    pid_t gpid = gov_on ? slim_gov_spawn(pid, port, rud, 0) : 0;
     out_t(c, "started session %s: pid %d port %d profile %s%s", s.name, s.pid, port, prof, headful ? " (headful)" : "");
+    if (gpid > 0) out_t(c, ", governor pid %d", (int)gpid);
+    out_i(c, "governor", gpid > 0 ? gpid : 0);
     out_s(c, "session", s.name); out_i(c, "pid", s.pid); out_i(c, "port", port);
     out_s(c, "ws", s.ws); out_s(c, "profile", prof); out_s(c, "user_data_dir", rud);
     out_b(c, "headless", !headful); out_s(c, "engine", engine); out_s(c, "log", logp);
@@ -377,6 +401,10 @@ int cmd_status(ctx_t *c, int argc, char **argv) {
     if (have_mem) {
         out_t(c, "\nprocs    %d\npss_kb   %ld\nrss_kb   %ld\nuss_kb   %ld", m.procs, m.pss_kb, m.rss_kb, m.uss_kb);
         out_i(c, "procs", m.procs); out_i(c, "pss_kb", m.pss_kb); out_i(c, "rss_kb", m.rss_kb); out_i(c, "uss_kb", m.uss_kb);
+        out_t(c, "\niso_kb   %ld\nanon_kb  %ld\nshmem_kb %ld\nfile_union_kb %ld", m.iso_kb, m.anon_kb, m.shmem_kb, m.file_union_kb);
+        out_i(c, "iso_kb", m.iso_kb); out_i(c, "anon_kb", m.anon_kb); out_i(c, "shmem_kb", m.shmem_kb); out_i(c, "file_union_kb", m.file_union_kb);
+        pid_t gp = slim_gov_find(pid);
+        out_t(c, "\ngovernor %d", (int)gp); out_i(c, "governor", gp);
     }
     free(product);
     return 0;
