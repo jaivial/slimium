@@ -21,6 +21,8 @@ variants=(
   "limit1+jitless|SLIM_OVERRIDE=$L SLIM_EXTRA=--js-flags=--jitless"
   "limit1+single-process|SLIM_OVERRIDE=$L SLIM_EXTRA=--single-process"
   "limit1+combo|SLIM_OVERRIDE=$L SLIM_EXTRA='$COMBO'"
+  "limit1+NSIP2+noWebUIOmnibox|SLIM_OVERRIDE=$L SLIM_EXTRA='--enable-features=NetworkServiceInProcess2 --disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup --disable-component-extensions-with-background-pages'"
+  "limit1+NSIP2+noWebUIOmnibox+in-process-gpu|SLIM_OVERRIDE=$L SLIM_EXTRA='--enable-features=NetworkServiceInProcess2 --disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup --disable-component-extensions-with-background-pages --in-process-gpu'"
   "headless-shell(stock,direct)|DIRECT=$HS"
   "headless-shell+limit1+combo|SLIM_ENGINE=$HS SLIM_OVERRIDE=$L SLIM_EXTRA='$COMBO'"
 )

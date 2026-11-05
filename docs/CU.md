@@ -159,11 +159,13 @@ runs. All configs: same cu-slim binary, `CU_HEADLESS=1`.
 | `slim`: stand-in, balanced (caller-wins merge) | 365.3 MB | 11 | 0.985 | 0.693 |
 | `slim-max`: stand-in, max | 349.4 MB | 9 | 0.942 | 0.663 |
 | stand-in, balanced, profile's `--renderer-process-limit=1` overrides cu's 4, + `NetworkServiceInProcess2` | 313.2 MB | 8 | 0.845 | 0.594 |
+| same + `--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup` + `--disable-component-extensions-with-background-pages` | **275.6 MB** | 7 | **0.743** | **0.523** |
+| same + `--in-process-gpu` | 286.6 MB | 6 | 0.773 | 0.544 |
 | `stock-script`: `/usr/bin/chromium-browser` (Fedora script, how cu runs it by default), cu fast | 375.2 MB | 13 | | |
 | `stock-elf`: Chromium ELF, cu fast flags only | 370.8 MB | 11 | 1 | |
 | `stock-compat`: Chromium ELF, `CU_MODE=compat` (cu adds 3 flags: plain Chromium) | 527.3 MB | 25 | | 1 |
 
-Raw: `tests/cu/results/ram-final.txt`, `ram-final-limit1-nsip2.txt`.
+Raw: `tests/cu/results/ram-final.txt`, `ram-final-limit1-nsip2.txt`, `ram-final-webui.txt`, `ram-final-webui-ipgpu.txt`.
 Single-run check of core's real wrapper (uncommitted build): balanced 356 MB
 (9 procs), max 322 MB (7 procs).
 
@@ -194,6 +196,8 @@ Measured with `tests/cu/variants.sh` (full suite + one RAM run per variant;
 | + `--js-flags=--jitless` | 71/71 | 342 MB | 9 |
 | + `--single-process` | **53/71** | 280 MB | 4 |
 | + in-process-gpu, NSIP2, no-zygote, no-sandbox, lite-mode | 71/71 | 360 MB | 4 |
+| + NSIP2 + no WebUI omnibox popups + no component extensions | 71/71 | 299 MB | 7 |
+| + the same + `--in-process-gpu` | 71/71 | 290 MB | 6 |
 | chrome-headless-shell 156, stock | 71/71 | 537 MB | 10 |
 | headless-shell + limit 1 + the combo above | 71/71 | 492 MB | 2 |
 
@@ -211,6 +215,10 @@ Measured with `tests/cu/variants.sh` (full suite + one RAM run per variant;
   a second one; the stand-in merges.)
 - **cu passes `--renderer-process-limit=4`**: with caller-wins merging the
   profile's 1 is lost. Memory switches must override the caller.
+- headless=new 156 preloads WebUI renderers (omnibox popups) and a component
+  extension: `--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup` and
+  `--disable-component-extensions-with-background-pages` remove them (-38 MB
+  through cu, suite passes). `--in-process-gpu` did not help in the 3-run median.
 - cu's `--enable-features=NetworkServiceInProcess` has no effect on Chromium
   156; `NetworkServiceInProcess2` does (-30 MB, suite passes).
 - `slimium-chrome --version` must print `Chromium 156...` on stdout: cu builds
