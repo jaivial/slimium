@@ -6,6 +6,8 @@
 #   steady    iso every 5 s for STEADY s (min / median / max / time-weighted mean)
 #   active    peak iso (1 s samples) during an active pass: snapshot + shot of every tab
 #   after     iso 30 s after the active pass
+#   latency   (LAT=1, default) 5 rounds of cu snapshot / click / shot on one tab right after a
+#             governor reclaim ("cold"; stock: after 30 s idle) and again immediately ("warm")
 # iso = sum Pss_Anon + Pss_Shmem + union of resident file pages of the browser tree (crashpad not
 # included). Configs: slim (cu-slim + ~/.local/bin/slimium-chrome, SLIM_PROFILE as given, default
 # balanced; HTTP 8790 / CDP 9390) and stock (CU_BROWSER=/usr/lib64/chromium-browser/chromium-browser,
@@ -44,6 +46,7 @@ one_run() { # one_run CONFIG RUN
   case $cfg in
     slim) B=$(slim_browser) port=8790 cdp=9390 ;;
     slim-hib) B=$(slim_browser) port=8790 cdp=9390 hib=3 ;;   # + opt-in hibernation, K=3, untouched >= 20 s
+    slim-nolite) B=$SHIM port=8790 cdp=9390 ;;                # balanced minus V8 --lite-mode (--js-flags=--no-lite-mode)
     stock) B=$ELF port=8791 cdp=9391 ;;
     stock-compat) B=$ELF port=8791 cdp=9391 mode=compat ;;   # cu passes only 3 flags: plain Chromium
     *) echo "unknown config $cfg" >&2; return 1 ;;
@@ -74,6 +77,32 @@ one_run() { # one_run CONFIG RUN
   done
   # active pass, sampled every second in the background
   ( while :; do echo "$(date +%s.%N) $(iso "$P")"; sleep 1; done ) >"$H/active" & SP=$!
+  # action latency right after a reclaim (cold) vs immediately again (warm); stock: after 30 s idle
+  local lat=-
+  if [ "${LAT:-1}" = 1 ] && [ "$cfg" != slim-hib ] && [ "$cfg" != stock-compat ]; then
+    local ft=${tabs[0]} ref r n0 c ts te k
+    ref=$("$CU_SLIM" snapshot --tab "$ft" 2>/dev/null | grep -i 'checkbox' | grep -o 'ref=e[0-9]*' | head -1 | cut -d= -f2)
+    : >"$H/lat"
+    for r in 1 2 3 4 5; do
+      if [ "$cfg" = stock ]; then sleep 30; else
+        n0=$(grep -c '"ev":"reclaim"' "$H/gov.log")
+        for c in $(seq 1 450); do [ "$(grep -c '"ev":"reclaim"' "$H/gov.log")" -gt "$n0" ] && break; sleep 0.1; done
+        sleep 0.3
+      fi
+      for k in cold warm; do
+        ts=$(date +%s%N); "$CU_SLIM" snapshot --tab "$ft" >/dev/null 2>&1; te=$(date +%s%N); echo "$k snapshot $(((te - ts) / 1000000))" >>"$H/lat"
+        ts=$(date +%s%N); "$CU_SLIM" click "$ref" --tab "$ft" >/dev/null 2>&1; te=$(date +%s%N); echo "$k click $(((te - ts) / 1000000))" >>"$H/lat"
+        ts=$(date +%s%N); "$CU_SLIM" shot "$H/l.png" --tab "$ft" >/dev/null 2>&1; te=$(date +%s%N); echo "$k shot $(((te - ts) / 1000000))" >>"$H/lat"
+      done
+    done
+    lat=$(awk '{v[$1" "$2]=v[$1" "$2]" "$3} END{for (k in v) print k":"v[k]}' "$H/lat" | sort | python3 -c '
+import sys
+out=[]
+for l in sys.stdin:
+    k,v=l.split(":"); x=sorted(map(int,v.split())); out.append("%s=%d/%d" % (k.replace(" ","_"), x[len(x)//2], x[-1]))
+print(",".join(out))')
+    cp "$H/lat" "${OUT%.txt}-$cfg-$run.lat" 2>/dev/null
+  fi
   local asnap=0
   for tab in "${tabs[@]}"; do
     case $("$CU_SLIM" snapshot --tab "$tab" 2>/dev/null) in *'ref=e'*|*heading*) asnap=$((asnap+1)) ;; esac
@@ -94,13 +123,20 @@ one_run() { # one_run CONFIG RUN
     cp "$H/gov.log" "${OUT%.txt}-$cfg-$run.gov.log" 2>/dev/null
   fi
   cp "$H/steady" "${OUT%.txt}-$cfg-$run.steady" 2>/dev/null
-  printf '%s %s settled_mb %.1f (anon+shmem %.1f file_union %.1f procs %s) steady_min/med/max/twmean %s active_peak %s after30 %.1f snapshots %d/%d active_snapshots %d shots %d gc_passes %s reclaims %s gov_cpu %s\n' \
+  printf '%s %s settled_mb %.1f (anon+shmem %.1f file_union %.1f procs %s) steady_min/med/max/twmean %s active_peak %s after30 %.1f snapshots %d/%d active_snapshots %d shots %d gc_passes %s reclaims %s gov_cpu %s latency_ms(median/max) %s\n' \
     "$cfg" "$run" "$(echo "${settled%% *} / 1024" | bc -l)" "$(echo "$settled" | awk '{print $2/1024}')" "$(echo "$settled" | awk '{print $3/1024}')" \
-    "$(echo "$settled" | awk '{print $4}')" "$st" "$ac" "$(echo "${after%% *} / 1024" | bc -l)" "$okc" "${#urls[@]}" "$asnap" "$shots" "$npass" "$nrec" "$gcpu"
+    "$(echo "$settled" | awk '{print $4}')" "$st" "$ac" "$(echo "${after%% *} / 1024" | bc -l)" "$okc" "${#urls[@]}" "$asnap" "$shots" "$npass" "$nrec" "$gcpu" "$lat"
   stop_instance R
   rm -rf "${H:?}"; H=
 }
 
+# shim for slim-nolite: same name (cu keys off it), same pid (exec). Profile list items win over
+# the caller's, so the shim runs the wrapper with SLIM_PROFILE=off and appends the balanced
+# switches minus --lite-mode (last occurrence wins for scalars; lists are merged into one).
+SHIMD=$(mktemp -d /tmp/cu-gov-shim.XXXXXX) SHIM=$SHIMD/slimium-chrome
+NOLITE=$("$CU_TESTS_DIR/../../build/bench/slim-merge" balanced | sed 's/ --lite-mode//' | tr '\n' ' ')
+printf '#!/bin/sh\nSLIM_PROFILE=off exec %s "$@" %s\n' "$(slim_browser)" "$NOLITE" >"$SHIM"; chmod +x "$SHIM"
+trap 'cleanup; rm -rf "${SHIMD:?}"' EXIT
 before=$(user_cu_fingerprint)
 start_fixtures "$FIX_PORT" || exit 1
 { echo "# gov-ram $(date -Is) on $(hostname); settle=${SETTLE}s steady=${STEADY}s (5 s samples); SLIM_PROFILE=${SLIM_PROFILE:-balanced}"
