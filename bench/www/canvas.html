@@ -1,0 +1,17 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Bench Canvas Gallery</title>
+<script src="rand.js"></script></head><body><h1>Gallery</h1><canvas id="c" width="1600" height="1200"></canvas><div id="g"></div>
+<svg width="400" height="300"><circle cx="150" cy="150" r="120" fill="#36c"/><rect x="200" y="50" width="180" height="200" fill="#c63" opacity=".7"/></svg>
+<script>
+var c = document.getElementById('c'), x = c.getContext('2d');
+for (var i = 0; i < 4000; i++) { x.fillStyle = 'hsl(' + ((rnd() * 360) | 0) + ',70%,50%)'; x.fillRect(rnd() * 1600, rnd() * 1200, rnd() * 80, rnd() * 80); }
+x.font = '48px sans-serif'; x.fillStyle = '#000'; x.fillText('slimium canvas', 40, 80);
+var g = document.getElementById('g');
+for (var k = 0; k < 24; k++) {
+  var o = document.createElement('canvas'); o.width = 512; o.height = 384; var y = o.getContext('2d');
+  var gr = y.createLinearGradient(0, 0, 512, 384); gr.addColorStop(0, 'hsl(' + k * 15 + ',80%,60%)'); gr.addColorStop(1, '#123');
+  y.fillStyle = gr; y.fillRect(0, 0, 512, 384);
+  for (var q = 0; q < 300; q++) { y.fillStyle = 'rgba(255,255,255,' + rnd() * .5 + ')'; y.beginPath(); y.arc(rnd() * 512, rnd() * 384, rnd() * 20, 0, 7); y.fill(); }
+  var img = new Image(); img.src = o.toDataURL('image/png'); img.width = 256; g.appendChild(img);
+}
+document.body.dataset.ready = '1';
+</script></body></html>

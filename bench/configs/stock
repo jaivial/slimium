@@ -1,0 +1,2 @@
+# Stock Chromium: only what a headless DevTools run needs.
+--no-first-run

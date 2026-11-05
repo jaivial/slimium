@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Fid WebGL</title></head><body style="margin:20px">
+<canvas id="c" width="400" height="300"></canvas><p id="s"></p><script>
+var c=document.getElementById('c'),gl=c.getContext('webgl',{preserveDrawingBuffer:true});
+if(!gl){document.getElementById('s').textContent='NO WEBGL';document.title='Fid WebGL none';}else{
+function sh(t,s){var o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);return o}
+var p=gl.createProgram();gl.attachShader(p,sh(gl.VERTEX_SHADER,'attribute vec2 a;varying vec2 v;void main(){v=a;gl_Position=vec4(a,0,1);}'));
+gl.attachShader(p,sh(gl.FRAGMENT_SHADER,'precision mediump float;varying vec2 v;void main(){gl_FragColor=vec4(v*.5+.5,.3,1);}'));gl.linkProgram(p);gl.useProgram(p);
+var b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([0,.8,-.8,-.8,.8,-.8]),gl.STATIC_DRAW);
+var l=gl.getAttribLocation(p,'a');gl.enableVertexAttribArray(l);gl.vertexAttribPointer(l,2,gl.FLOAT,false,0,0);gl.clearColor(.1,.1,.1,1);gl.clear(gl.COLOR_BUFFER_BIT);gl.drawArrays(gl.TRIANGLES,0,3);
+document.getElementById('s').textContent='WEBGL OK';document.title='Fid WebGL ok';}
+</script></body></html>

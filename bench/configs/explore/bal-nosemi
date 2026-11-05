@@ -1,0 +1,3 @@
+@merge balanced
+--no-first-run
+--js-flags=--max-semi-space-size=16

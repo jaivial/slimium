@@ -1,0 +1,44 @@
+# name | flags (separated by " ;; ") -- each is measured as a delta on top of "stock"
+rpl1 | --renderer-process-limit=1
+rpl4 | --renderer-process-limit=4
+pps | --process-per-site
+dsit | --disable-site-isolation-trials
+df-spp | --disable-features=IsolateOrigins,site-per-process
+df-SitePerProcess | --disable-features=IsolateOrigins,SitePerProcess
+dsit+rpl1 | --disable-site-isolation-trials ;; --renderer-process-limit=1
+dsit+rpl1+pps | --disable-site-isolation-trials ;; --renderer-process-limit=1 ;; --process-per-site
+df-bg | --disable-features=OptimizationGuideModelDownloading,OptimizationHintsFetching,OptimizationTargetPrediction,OptimizationHints,Translate,MediaRouter,DialMediaRouteProvider,AutofillServerCommunication,CertificateTransparencyComponentUpdater,PrivacySandboxSettings4,InterestFeedContentSuggestions,LensOverlay,CalculateNativeWinOcclusion,HeavyAdIntervention
+df-bfcache | --disable-features=BackForwardCache
+df-paintholding | --disable-features=PaintHolding
+df-spare | --disable-features=SpareRendererForSitePerProcess
+df-prerender | --disable-features=Prerender2,NoStatePrefetch
+nsip | --enable-features=NetworkServiceInProcess
+nsip2 | --enable-features=NetworkServiceInProcess2
+ipgpu | --in-process-gpu
+dgpu | --disable-gpu
+dgpu+dsr | --disable-gpu ;; --disable-software-rasterizer
+single | --single-process
+nosandbox | --no-sandbox
+nozygote | --no-sandbox ;; --no-zygote
+lowend | --enable-low-end-device-mode
+devshm | --disable-dev-shm-usage
+diskcache | --disk-cache-size=1048576
+aggrcache | --aggressive-cache-discard
+js-maxlazy | --js-flags=--max-lazy
+js-ofs | --js-flags=--optimize-for-size
+js-lite | --js-flags=--lite-mode
+js-jitless | --js-flags=--jitless
+js-semi1 | --js-flags=--max-semi-space-size=1
+js-stgc | --js-flags=--single-threaded-gc
+js-nowasm | --js-flags=--no-expose-wasm
+js-combo | --js-flags=--max-lazy --optimize-for-size --max-semi-space-size=1 --single-threaded-gc
+dsf1 | --force-device-scale-factor=1
+win800 | --window-size=800,600
+noext | --disable-extensions
+bgnet | --disable-background-networking ;; --disable-component-update ;; --disable-sync ;; --disable-default-apps ;; --disable-component-extensions-with-background-pages
+breakpad | --disable-breakpad ;; --disable-crash-reporter
+domstorage | --enable-aggressive-domstorage-flushing
+raster1 | --num-raster-threads=1
+noa11y | --disable-renderer-accessibility
+gpumem | --force-gpu-mem-available-mb=64
+memmodel | --memory-model=low

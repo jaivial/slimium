@@ -1,0 +1,14 @@
+@merge off
+--no-first-run
+--renderer-process-limit=1
+--disable-site-isolation-trials
+--disable-component-extensions-with-background-pages
+--disable-extensions
+--disable-background-networking
+--disable-component-update
+--disable-default-apps
+--disable-sync
+--disable-breakpad
+--disable-features=IsolateOrigins,site-per-process,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup,Translate,OptimizationHints,OptimizationGuideModelDownloading,OptimizationHintsFetching,OptimizationTargetPrediction,MediaRouter,DialMediaRouteProvider,AutofillServerCommunication,CertificateTransparencyComponentUpdater,InterestFeedContentSuggestions,CalculateNativeWinOcclusion,HeavyAdIntervention,LensOverlay,BackForwardCache,SpareRendererForSitePerProcess
+--enable-features=NetworkServiceInProcess2,PartitionAllocMemoryReclaimer,PartitionAllocUseDenserDistribution,PartitionAllocSortActiveSlotSpans,PartitionAllocStraightenLargerSlotSpanFreeLists,PartitionAllocSortSmallerSlotSpanFreeLists,MemoryPurgeInBackground,MemoryPurgeOnFreeze
+--js-flags=--max-semi-space-size=1

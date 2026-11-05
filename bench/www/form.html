@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Bench Checkout Form</title>
+<style>label{display:block;margin:4px 0}</style><script src="rand.js"></script></head><body><h1>Checkout</h1>
+<form id="f" action="form.html" method="get"></form>
+<div contenteditable="true" style="border:1px solid #999;min-height:4em">Notes: edit me</div>
+<a id="dl" href="/dl/report.txt">download report</a>
+<script>
+var f = document.getElementById('f'), h = [];
+for (var i = 0; i < 300; i++) {
+  h.push('<label>Field ' + i + ' <input name="f' + i + '" value="' + WORDS[i % WORDS.length] + '"></label>');
+  if (i % 10 == 0) { var o = []; for (var k = 0; k < 50; k++) o.push('<option>' + sentence(2) + '</option>'); h.push('<select name="s' + i + '">' + o.join('') + '</select>'); }
+  if (i % 25 == 0) h.push('<textarea name="t' + i + '" rows="3" cols="60">' + sentence(30) + '</textarea>');
+}
+h.push('<label><input type="checkbox" name="agree"> I agree</label><button type="submit">Pay</button>');
+f.innerHTML = h.join('');
+document.body.dataset.ready = '1';
+</script></body></html>

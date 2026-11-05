@@ -1,0 +1,17 @@
+--no-first-run
+--renderer-process-limit=1
+--process-per-site
+--disable-site-isolation-trials
+--disable-component-extensions-with-background-pages
+--in-process-gpu
+--disable-gpu
+--disable-extensions
+--disable-background-networking
+--disable-component-update
+--disable-default-apps
+--disable-sync
+--disable-breakpad
+--enable-low-end-device-mode
+--disable-features=IsolateOrigins,site-per-process,WebUIOmniboxPopup,WebUIOmniboxAimPopup,BackForwardCache,SpareRendererForSitePerProcess
+--enable-features=NetworkServiceInProcess2
+--js-flags=--lite-mode

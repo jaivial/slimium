@@ -1,0 +1,21 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Bench SPA Dashboard</title>
+<style>td{padding:2px 6px;border-bottom:1px solid #ddd}.hot{color:#c00}</style>
+<script src="rand.js"></script></head><body><h1>Dashboard</h1><div id="stats"></div><table id="t"></table>
+<script>
+// A JS-heavy single-page app: a big in-memory model, a large rendered table
+// and a store of closures, re-rendered on a timer like a live dashboard.
+var model = [];
+for (var i = 0; i < 200000; i++) model.push({id: i, name: 'item-' + i, price: rnd() * 1000, tags: ['a' + (i % 7), 'b' + (i % 13)], hot: rnd() > 0.9});
+var series = new Float64Array(1 << 20); for (var j = 0; j < series.length; j++) series[j] = rnd();
+var cache = new Map(); for (var k = 0; k < 50000; k++) cache.set('k' + k, (function (v) { return function () { return v * 2; }; })(k));
+var json = JSON.stringify(model.slice(0, 20000));
+function render() {
+  var t = document.getElementById('t'), rows = [];
+  for (var i = 0; i < 3000; i++) { var m = model[(i * 37) % model.length]; rows.push('<tr class="' + (m.hot ? 'hot' : '') + '"><td>' + m.id + '</td><td>' + m.name + '</td><td>' + m.price.toFixed(2) + '</td><td>' + m.tags.join(',') + '</td></tr>'); }
+  t.innerHTML = rows.join('');
+  document.getElementById('stats').textContent = 'rows ' + model.length + ' json ' + json.length;
+}
+render();
+setInterval(function () { model[(rnd() * model.length) | 0].price = rnd() * 1000; }, 1000);
+document.body.dataset.ready = '1';
+</script></body></html>

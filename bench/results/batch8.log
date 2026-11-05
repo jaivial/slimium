@@ -1,0 +1,23 @@
++ T=batch8
++ TAG=batch8
++ ./bench.sh ab stock balanced B 2
+stock B#1: iso 837 MB anon 524 pss 675 procs 22 tabs 7 load 7s
+balanced B#1: iso 625 MB anon 334 pss 429 procs 10 tabs 7 load 3s
+stock B#2: iso 835 MB anon 523 pss 710 procs 22 tabs 7 load 12s
+balanced B#2: iso 624 MB anon 334 pss 467 procs 10 tabs 7 load 12s
++ TAG=batch8
++ ./bench.sh run max B 2
+max B#1: iso 606 MB anon 316 pss 449 procs 10 tabs 7 load 17s
+max B#2: iso 607 MB anon 316 pss 448 procs 10 tabs 7 load 13s
++ TAG=batch8
++ ./bench.sh run hs-stock B 1
+hs-stock B#1: iso 771 MB anon 552 pss 753 procs 13 tabs 7 load 8s
++ ./governor.sh hs-balanced A
+base: iso 475 MB anon 327 pss 465 procs 6
+gc: iso 465 MB anon 317 pss 454 procs 6
+pressure: iso 468 MB anon 312 pss 458 procs 6
+freeze: iso 454 MB anon 312 pss 443 procs 6
+minimize: iso 454 MB anon 312 pss 443 procs 6
+min+press: iso 454 MB anon 312 pss 443 procs 6
+later: iso 453 MB anon 311 pss 441 procs 6
+{"config":"hs-balanced","workload":"A","date":"2026-11-05T21:09:12Z","resume_ok":"7/7","steps":[{"step":"base","iso_kb":487410,"anon_kb":335447,"pss_kb":476330,"uss_kb":378276,"procs":6},{"step":"gc","iso_kb":476994,"anon_kb":324915,"pss_kb":465914,"uss_kb":367848,"procs":6},{"step":"pressure","iso_kb":480146,"anon_kb":320199,"pss_kb":469065,"uss_kb":367856,"procs":6},{"step":"freeze","iso_kb":465266,"anon_kb":320215,"pss_kb":454185,"uss_kb":361668,"procs":6},{"step":"minimize","iso_kb":465430,"anon_kb":320379,"pss_kb":454349,"uss_kb":361832,"procs":6},{"step":"min+press","iso_kb":465414,"anon_kb":320363,"pss_kb":454332,"uss_kb":361788,"procs":6},{"step":"later","iso_kb":463910,"anon_kb":318795,"pss_kb":452465,"uss_kb":360284,"procs":6}]}

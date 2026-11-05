@@ -1,0 +1,14 @@
+p1 A#1: pss 469 MB procs 9 tabs 7 load 3s
+p1 A#2: pss 461 MB procs 9 tabs 7 load 3s
+p1 A#3: pss 464 MB procs 9 tabs 7 load 7s
+p1+ipgpu A#1: pss 522 MB procs 8 tabs 7 load 3s
+p1+ipgpu A#2: pss 472 MB procs 8 tabs 7 load 3s
+p1+ipgpu A#3: pss 471 MB procs 8 tabs 7 load 2s
+p1+dgpu A#1: pss 514 MB procs 9 tabs 7 load 3s
+p1+dgpu A#2: pss 465 MB procs 9 tabs 7 load 3s
+p1+dgpu A#3: pss 510 MB procs 9 tabs 7 load 2s
+p1+js-semi1 A#1: pss 467 MB procs 9 tabs 7 load 3s
+p1+js-semi1 A#2: pss 464 MB procs 9 tabs 7 load 3s
+p1+js-semi1 A#3: pss 457 MB procs 9 tabs 7 load 3s
+p1+js-full A#1: pss 466 MB procs 9 tabs 7 load 3s
+p1+js-full A#2: pss 449 MB procs 9 tabs 7 load 3s

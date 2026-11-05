@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Bench Frames Portal</title></head><body>
+<h1>Portal with embedded frames</h1>
+<p>Cross-site frame (another loopback host = another site):</p>
+<iframe id="x" width="700" height="400"></iframe>
+<p>Same-site frame:</p><iframe src="inner.html" width="700" height="300"></iframe>
+<script>
+// The cross-site frame is served by the same server on another loopback host.
+document.getElementById('x').src = location.protocol + '//127.0.0.7:' + location.port + '/inner.html?x';
+document.body.dataset.ready = '1';
+</script></body></html>

@@ -1,0 +1,3 @@
+--no-first-run
+--disable-breakpad
+--disable-crash-reporter
