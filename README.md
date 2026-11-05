@@ -3,7 +3,33 @@
 A Chromium-based browser for AI agents, written in C: the Chromium engine under a low-memory
 process model, with every operation available from the command line, built to be cu's browser.
 
-Status: under construction. See AGENTS.md for the rules and layout.
+- **Half the RAM or less.** Same Chromium 156 engine, low-memory process model ([docs/PROFILE.md](docs/PROFILE.md)) plus a
+  tiny memory governor ([docs/GOVERNOR.md](docs/GOVERNOR.md)): idle GC + memory-pressure and cgroup proactive reclaim of
+  the engine's file pages (private reflinked engine copy, own systemd scope, pid preserved).
+- **Pixel-identical rendering.** Screenshots match stock Chromium (0.0% pixel diff on text/web fonts, images, canvas,
+  SVG, CSS, WebGL, full page, Wikipedia).
+- **Everything on the CLI.** One 134 KB C binary (libc only), ~2 MB RSS and 3-30 ms per command; `batch` runs many
+  commands over one connection; `cdp` reaches any DevTools method.
+- **Built for cu.** `CU_BROWSER=slimium-chrome` is a drop-in browser for cu: cu's 71-check suite passes
+  ([docs/CU.md](docs/CU.md)); `cu-slim` is a second, isolated cu deployment wired to slimium.
+
+## Results (isolated footprint = Pss_Anon + Pss_Shmem + union of resident file pages, MB)
+
+| workload | stock | slimium | ratio |
+| --- | ---: | ---: | ---: |
+| through cu, 13 tabs, steady median — vs plain Chromium (cu compat mode) | 709 | 225 | **0.32x** |
+| through cu, 13 tabs, steady median — vs cu's own fast-mode Chromium | 532 | 225 | **0.42x** |
+| through cu, steady time-weighted mean (vs cu fast) | 540 | 233 | 0.43x |
+| through cu, peak during an active pass (vs cu fast) | 590 | 368 | 0.62x |
+| standalone, workload A, steady median (`slimium start` vs stock ELF) | 828-836 | 410 | 0.49x |
+| 56 tabs, flags only (no governor) | 2191 / 73 procs | 1155-1285 / 10 procs | ~0.55x |
+
+Profile `balanced` (default). `max` adds V8 lite mode and PartitionAlloc hardening off (215 MB through cu, 0.40x).
+Numbers and method: [docs/BENCHMARKS.md](docs/BENCHMARKS.md), [docs/GOVERNOR.md](docs/GOVERNOR.md), [docs/CU.md](docs/CU.md).
+Trade-offs: the first action after a reclaim pays +30-110 ms once; private engine copies (reflinks on btrfs);
+a single renderer process (no site isolation) — use it for agent work, not as a hardened daily browser.
+
+See AGENTS.md for the rules and layout.
 
 ## Build
 
