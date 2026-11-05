@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Form fixture</title>
+<style>body{font:16px sans-serif;margin:20px} .box{width:120px;height:40px;background:#cde;margin:8px 0}</style></head>
+<body>
+<h1 id="h">Form</h1>
+<form id="f" onsubmit="event.preventDefault();document.getElementById('out').textContent='submitted:'+document.getElementById('name').value">
+  <input id="name" name="name" placeholder="name">
+  <textarea id="bio"></textarea>
+  <select id="color"><option value="r">Red</option><option value="g">Green</option><option value="b">Blue</option></select>
+  <label><input type="checkbox" id="agree"> agree</label>
+  <label><input type="radio" name="size" id="small" value="s"> small</label>
+  <label><input type="radio" name="size" id="large" value="l"> large</label>
+  <div id="ce" contenteditable="true" style="border:1px solid #999;min-height:20px">old</div>
+  <button id="submit" type="submit">Submit</button>
+</form>
+<div id="out"></div>
+<div id="clicks" class="box" onclick="this.dataset.n=(+this.dataset.n||0)+1;this.textContent='clicks '+this.dataset.n" ondblclick="this.dataset.dbl='yes'">click me</div>
+<div id="hov" class="box" onmouseover="this.textContent='hovered'">hover me</div>
+<div id="hidden" style="display:none">hidden</div>
+<script>
+window.keys=[];
+document.getElementById('name').addEventListener('keydown',function(e){window.keys.push(e.key)});
+document.addEventListener('keydown',function(e){window.lastKey=e.key+(e.ctrlKey?'+ctrl':'')});
+document.getElementById('color').addEventListener('change',function(){window.colorChanged=this.value});
+setTimeout(function(){var d=document.createElement('div');d.id='late';d.textContent='late';document.body.appendChild(d)},700);
+</script>
+</body></html>
