@@ -1,0 +1,3 @@
+# variant | suite | pss_MB procs | failing checks   (2026-11-05T20:35:21+01:00)
+limit1+NSIP2+noWebUIOmnibox | 71 passed, 0 failed; known cu issues: long.text-capped-flag download.click-reply | 299 MB 7 procs 13/13 snaps
+limit1+NSIP2+noWebUIOmnibox+in-process-gpu | 71 passed, 0 failed; known cu issues: long.text-capped-flag download.click-reply | 290 MB 6 procs 13/13 snaps

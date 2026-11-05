@@ -1,0 +1,13 @@
+<!doctype html><meta charset=utf-8><title>Shadow fixture</title>
+<h1>Shadow DOM</h1>
+<slim-card></slim-card>
+<p id=out>shadow idle</p>
+<script>
+customElements.define('slim-card', class extends HTMLElement {
+  connectedCallback(){
+    var r=this.attachShadow({mode:'open'});
+    r.innerHTML='<style>button{color:#036}</style><div class=card><button id=sb>Shadow button</button><input aria-label="Shadow input"></div>';
+    r.getElementById('sb').addEventListener('click',function(){document.getElementById('out').textContent='SHADOW CLICKED'});
+  }
+});
+</script>

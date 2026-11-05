@@ -1,0 +1,32 @@
+# cu RAM comparison 2026-11-05T20:28:10+01:00 on fedora; runs=3 settle=5s
+# slim browser: /home/jaime/slimium-wt/cu-integration/tests/cu/slimium-chrome-standin.sh; cu: a857f14 fix: cu mark, cu console and cu upload work in the session's tab (they went to the default tab under the daemon)
+# flow: 10 fixture tabs + 3 real sites, one leased tab each, snapshot each
+# config run pss_kb rss_kb procs snapshots_ok
+slim 1 370903 1423840 11 13/13
+slim 2 379370 1431616 11 13/13
+slim 3 374039 1420860 11 13/13
+slim-max 1 357792 1275928 9 13/13
+slim-max 2 361730 1274748 9 13/13
+slim-max 3 352810 1271800 9 13/13
+stock-script 1 385151 1422212 13 13/13
+stock-script 2 380940 1420836 13 13/13
+stock-script 3 384190 1424136 13 13/13
+stock-elf 1 379720 1412408 11 13/13
+stock-elf 2 381934 1418232 11 13/13
+stock-elf 3 372323 1422232 11 13/13
+stock-compat 1 542624 3178800 25 13/13
+stock-compat 2 539976 3173000 25 13/13
+stock-compat 3 533678 3171432 25 13/13
+# median PSS (MB) of 3 runs:
+#   slim            365.3 MB
+#   slim-max        349.4 MB
+#   stock-script    375.2 MB
+#   stock-elf       370.8 MB
+#   stock-compat    527.3 MB
+#   ratio slim      / stock-elf     = 0.985
+#   ratio slim      / stock-script  = 0.974
+#   ratio slim      / stock-compat  = 0.693
+#   ratio slim-max  / stock-elf     = 0.942
+#   ratio slim-max  / stock-script  = 0.931
+#   ratio slim-max  / stock-compat  = 0.663
+# user's cu untouched

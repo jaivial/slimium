@@ -1,0 +1,27 @@
+#!/bin/sh
+# cu-slim: a second, isolated cu whose browser is slimium (slimium-chrome).
+# It never talks to the user's cu: own daemon dir, own HTTP and DevTools ports.
+# Source: slimium tests/cu/cu-slim; installed by tests/cu/install.sh.
+#
+# Overrides (all optional): CU_SLIM_HOME (daemon dir), CU_SLIM_PORT (HTTP),
+# CU_SLIM_CDP_PORT (DevTools), CU_SLIM_BROWSER (browser executable),
+# CU_SLIM_MODE (fast|compat), SLIM_PROFILE (off|balanced|max).
+home=${CU_SLIM_HOME:-$HOME/.local/share/cu-slim}
+if [ -n "${CU_SLIM_BROWSER:-}" ]; then
+  browser=$CU_SLIM_BROWSER
+elif [ -x "$HOME/.local/bin/slimium-chrome" ]; then
+  browser=$HOME/.local/bin/slimium-chrome
+else
+  browser=$home/bin/slimium-chrome-standin.sh
+fi
+# CU_DATA_DIR would put the CLI in cu's legacy single-tab mode (no per-agent
+# sessions), and the user's own cu settings must not leak into this one.
+unset CU_DATA_DIR CU_VAULT_HOST CU_PUBLIC_URL CU_MIN_DEFAULT CU_DISPLAY
+export CU_DAEMON_DIR="$home"
+export CU_PORT="${CU_SLIM_PORT:-8790}"
+export CU_CDP_PORT="${CU_SLIM_CDP_PORT:-9390}"
+export CU_BROWSER="$browser"
+export CU_MODE="${CU_SLIM_MODE:-fast}"
+export CU_HEADLESS=1
+export SLIM_PROFILE="${SLIM_PROFILE:-balanced}"
+exec "$HOME/.local/bin/cu-slim-bin" "$@"

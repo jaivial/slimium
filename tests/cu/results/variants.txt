@@ -1,0 +1,31 @@
+# variant | suite | pss_MB procs | failing checks   (2026-11-05T20:21:49+01:00)
+base | 71 passed, 0 failed; known cu issues: long.text-capped-flag download.click-reply | 368 MB 11 procs 13/13 snaps
+limit1 | 71 passed, 0 failed; known cu issues: long.text-capped-flag download.click-reply | 342 MB 9 procs 13/13 snaps
+limit1+in-process-gpu | 71 passed, 0 failed; known cu issues: long.text-capped-flag download.click-reply | 351 MB 8 procs 13/13 snaps
+limit1+NetworkServiceInProcess2 | 71 passed, 0 failed; known cu issues: long.text-capped-flag download.click-reply | 316 MB 8 procs 13/13 snaps
+limit1+no-zygote+no-sandbox | 71 passed, 0 failed; known cu issues: long.text-capped-flag download.click-reply | 387 MB 6 procs 13/13 snaps
+limit1+no-sandbox | 71 passed, 0 failed; known cu issues: long.text-capped-flag download.click-reply | 347 MB 8 procs 13/13 snaps
+limit1+lite-mode | 71 passed, 0 failed; known cu issues: long.text-capped-flag download.click-reply | 340 MB 9 procs 13/13 snaps
+limit1+jitless | 71 passed, 0 failed; known cu issues: long.text-capped-flag download.click-reply | 342 MB 9 procs 13/13 snaps
+limit1+single-process | 53 passed, 18 failed: context.open context.isolated context.own-login context.second-isolated context.default-untouched context.list context.close downloads.list downloads.file upload upload.page tab.open tab.by-id tab.close new-tab.navigate parallel.20-flows (0/20 in 109 ms) parallel.distinct-tabs (0) parallel.tabs-closed ( -> ); known cu issues: long.text-capped-flag download.click-reply | 280 MB 4 procs 13/13 snaps
+    FAIL context.open: {"error":"Chromium did not open a tab in the new context"}
+    FAIL context.isolated: {"error":"Connection refused (os error 111)"}
+    FAIL context.own-login: {"error":"Connection refused (os error 111)"}
+    FAIL context.second-isolated: {"error":"Connection refused (os error 111)"}
+    FAIL context.default-untouched: 
+    FAIL context.list: {"contexts":[]}
+    FAIL context.close: {"closed":false}
+    FAIL downloads.list: {"downloads":[]}
+    FAIL downloads.file: total 0 drwxr-xr-x. 2 jaime jaime  40 Nov  5 20:25 . drwx------. 5 jaime jaime 340 Nov  5 20:26 ..
+    FAIL upload: 
+    FAIL upload.page: 
+    FAIL tab.open: {"error":"Connection refused (os error 111)"}
+    FAIL tab.by-id: 
+    FAIL tab.close: 
+    FAIL new-tab.navigate: 
+    FAIL parallel.20-flows (0/20 in 109 ms): 0
+    FAIL parallel.distinct-tabs (0): 0
+    FAIL parallel.tabs-closed ( -> ): 
+limit1+combo | 71 passed, 0 failed; known cu issues: long.text-capped-flag download.click-reply | 360 MB 4 procs 13/13 snaps
+headless-shell(stock,direct) | 71 passed, 0 failed; known cu issues: long.text-capped-flag download.click-reply | 537 MB 10 procs 13/13 snaps
+headless-shell+limit1+combo | 71 passed, 0 failed; known cu issues: long.text-capped-flag download.click-reply | 492 MB 2 procs 13/13 snaps
