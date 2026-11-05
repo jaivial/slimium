@@ -1,0 +1,4 @@
+# cu RAM comparison 2026-11-05T20:28:10+01:00 on fedora; runs=3 settle=5s
+# slim browser: /home/jaime/slimium-wt/cu-integration/tests/cu/slimium-chrome-standin.sh; cu: a857f14 fix: cu mark, cu console and cu upload work in the session's tab (they went to the default tab under the daemon)
+# flow: 10 fixture tabs + 3 real sites, one leased tab each, snapshot each
+# config run pss_kb rss_kb procs snapshots_ok

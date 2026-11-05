@@ -45,6 +45,15 @@ case $level in
   *) echo "slimium-chrome: unknown SLIM_PROFILE '$level' (off|balanced|max)" >&2; exit 2 ;;
 esac
 
+# Experiments: SLIM_EXTRA="--flag ..." adds profile flags; SLIM_OVERRIDE=
+# "--switch,..." lets the profile's value of those switches beat the caller's.
+[ -n "${SLIM_EXTRA:-}" ] && read -ra extra <<<"$SLIM_EXTRA" && profile+=("${extra[@]}")
+declare -A override=()
+IFS=, read -ra _ov <<<"${SLIM_OVERRIDE:-}"
+for o in "${_ov[@]}"; do
+  for f in "${profile[@]}"; do [ "${f%%=*}" = "$o" ] && override[$o]=1; done
+done
+
 # Version/help probes go straight to the engine (cu runs --version for its UA).
 for a in "$@"; do
   case $a in --version|-version|--product-version) exec "${SLIM_ENGINE:-/usr/bin/chromium-browser}" "$a" ;; esac
@@ -69,6 +78,7 @@ take() { # $1=arg, $2=from caller (1) or profile (0)
   esac
   if [[ $a == --* ]]; then
     name=${a%%=*}
+    if [ "$2" = 1 ] && [ -n "${override[$name]:-}" ]; then return; fi
     if [ "$2" = 0 ] && [ -n "${seen[$name]:-}" ]; then return; fi
     seen[$name]=1
     out+=("$a")
