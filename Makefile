@@ -19,7 +19,7 @@ OBJS := $(SRCS:src/%.c=$(BUILD)/%.o)
 LIBSRCS := src/util.c src/json.c src/b64.c src/ws.c
 HDRS := $(wildcard src/*.h)
 
-.PHONY: all test unit clean install uninstall asan bench size
+.PHONY: all test test-asan unit clean install uninstall asan bench size
 all: slimium slimium-chrome
 
 $(BUILD)/%.o: src/%.c $(HDRS) | $(BUILD)
@@ -49,6 +49,10 @@ asan: $(SRCS) $(HDRS) tests/unit.c
 
 test: all unit
 	tests/run.sh
+
+# sanitizer run of unit + functional suites (see tests/asan.sh)
+test-asan:
+	tests/asan.sh
 
 bench: all
 	@if [ -x bench/run.sh ]; then bench/run.sh; else echo "bench/run.sh not present (memory track)"; fi

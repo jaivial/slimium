@@ -39,12 +39,13 @@ LAST=""
 # run NAME EXPECTED_RC [args...] -> stdout in $LAST, stderr in $OUT/err
 run() {
     local name=$1 want=$2; shift 2
-    local t0 t1 rc
+    local t0 t1 rc b=$BIN
+    case "$1" in start | stop) b=$CTL ;; esac # browser lifecycle always runs on the host
     t0=$(date +%s%N)
     if [ "$METRICS" = 1 ]; then
-        /usr/bin/time -f '%M' -o "$OUT/time" $BIN --session "$SES" "$@" >"$OUT/out" 2>"$OUT/err" <"${STDIN:-/dev/null}"
+        /usr/bin/time -f '%M' -o "$OUT/time" $b --session "$SES" "$@" >"$OUT/out" 2>"$OUT/err" <"${STDIN:-/dev/null}"
     else
-        $EXEC $BIN --session "$SES" "$@" >"$OUT/out" 2>"$OUT/err" <"${STDIN:-/dev/null}"
+        $EXEC $b --session "$SES" "$@" >"$OUT/out" 2>"$OUT/err" <"${STDIN:-/dev/null}"
     fi
     rc=$?
     t1=$(date +%s%N)
@@ -72,7 +73,7 @@ errcheck() { if grep -Eq -- "$2" "$OUT/err"; then pass=$((pass + 1)); else echo 
 pngh() { od -An -tu1 -j20 -N4 "$1" | awk '{print $1*16777216+$2*65536+$3*256+$4}'; }
 ok() { if eval "$2"; then pass=$((pass + 1)); else echo "FAIL [$1] $3"; fail=$((fail + 1)); fi; }
 
-HPORT=$((PORT + 18)) # local HTTP fixture server (9328 by default)
+HPORT=${SLIM_HTTP_PORT:-9328} # local HTTP fixture server
 if command -v python3 >/dev/null; then
     (cd "$FX" && exec python3 -m http.server --bind 127.0.0.1 "$HPORT" >/dev/null 2>&1) &
     HPID=$!
@@ -90,8 +91,9 @@ t no-session-json 1 '"ok":false' --json url
 # ---- session lifecycle ----
 t start 0 "started session $SES" start --port "$PORT" --user-data-dir "$UDD" --profile balanced --window 1000x700 || { echo "cannot start browser"; exit 1; }
 t start-again 1 '' start --port "$PORT"
+NOPROC=${SLIM_NO_PROC:-}
 t status 0 'alive +yes' status
-check status-mem 'pss_kb +[0-9]+'
+[ -z "$NOPROC" ] && check status-mem 'pss_kb +[0-9]+'
 t status-json 0 '"alive":true' --json status
 t sessions 0 "$SES" sessions
 
@@ -200,6 +202,18 @@ t shot-bad 2 '' shot "$OUT/x.png" --format gif
 t pdf 0 'bytes' pdf "$OUT/p.pdf"
 LAST=$(head -c 5 "$OUT/p.pdf"); check pdf-magic '^%PDF-'
 
+# ---- rendering fidelity: decode our own screenshot in the page and sample pixels ----
+t nav-render 0 'Render fixture' nav "$FX/render.html"
+t webgl 0 '^true$' eval 'window.webglOK'
+t shot-render 0 'bytes' shot "$OUT/r.png"
+{ printf "new Promise(function(res){var i=new Image();i.onload=function(){var c=document.createElement('canvas');"
+  printf "c.width=i.width;c.height=i.height;var x=c.getContext('2d');x.drawImage(i,0,0);"
+  printf "function p(X,Y){return Array.prototype.slice.call(x.getImageData(X,Y,1,1).data,0,3).join(',')}"
+  printf "res([p(50,50),p(250,50),p(450,50),p(50,250),p(250,250),p(450,250),p(405,205),p(602,50)].join(' '))};"
+  printf "i.onerror=function(){res('decode failed')};i.src='data:image/png;base64,%s'})" "$(base64 -w0 "$OUT/r.png")"; } >"$OUT/px.js"
+# css red, canvas2d green, svg blue, webgl yellow, <img> magenta, transformed cyan + white corner, gradient dark edge
+STDIN="$OUT/px.js" t render-pixels 0 '^255,0,0 0,255,0 0,0,255 255,255,0 255,0,255 0,255,255 255,255,255 [0-9],[0-9],[0-9]$' eval -
+
 # ---- frames ----
 t nav-iframe 0 'Iframe' nav "$FX/iframe.html"
 t frames 0 'name=inner' frames
@@ -278,9 +292,9 @@ t close-cur 0 'closed' close
 t auto-tab 0 '' url
 
 # ---- memory ----
-t mem 0 'browser pid [0-9]+ procs [0-9]+ pss [0-9]+ KB' mem
+if [ -z "$NOPROC" ]; then t mem 0 'browser pid [0-9]+ procs [0-9]+ pss [0-9]+ KB' mem; else t mem 0 'browser pid' mem; fi
 check mem-tab 'tab [0-9A-F]{32} heap'
-t mem-json 0 '"pss_kb":[0-9]+' --json mem
+[ -z "$NOPROC" ] && t mem-json 0 '"pss_kb":[0-9]+' --json mem
 t purge 0 'gc on [0-9]+ tab' purge
 t after-purge 0 '^2$' eval '1+1'
 
@@ -328,9 +342,9 @@ t still-alive 0 'alive +yes' status
 
 # ---- wrapper (argv[0] = slimium-chrome) ----
 WRAP=$(dirname "$BIN")/slimium-chrome
-LAST=$($EXEC "$WRAP" --version 2>&1); check wrapper-version '^(Chromium|Google Chrome) [0-9]+\.'
-LAST=$($EXEC "$BIN" chrome --version 2>&1); check chrome-subcmd-version '^(Chromium|Google Chrome) [0-9]+\.'
-if [ -z "$EXEC" ]; then
+if [ -z "${SLIM_NO_ENGINE_TESTS:-}" ]; then
+    LAST=$("$WRAP" --version 2>&1); check wrapper-version '^(Chromium|Google Chrome) [0-9]+\.'
+    LAST=$("$BIN" chrome --version 2>&1); check chrome-subcmd-version '^(Chromium|Google Chrome) [0-9]+\.'
     WL="$OUT/wrapper.log"
     LAST=$(SLIM_WRAPPER_LOG="$WL" SLIM_PROFILE=max timeout 60 "$WRAP" --headless=new --user-data-dir="$OUT/wudd" --no-first-run \
         --dump-dom "data:text/html,<p id=w>wrapped</p>" 2>/dev/null)

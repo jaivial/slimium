@@ -48,7 +48,7 @@ static int poll_ready(ctx_t *c, int mode, long long dl) {
             int ok = json_get(o, "value", &v) && json_bool(v);
             free(r);
             if (ok) return 0;
-        } else if (strstr(slim_errmsg(), "detached") || strstr(slim_errmsg(), "connection")) return -1;
+        } else if (!strstr(slim_errmsg(), "execution context")) return -1;
         if (now_ms() > dl) return slim_seterr("timeout waiting for page load");
         sleep_ms(50);
     }
