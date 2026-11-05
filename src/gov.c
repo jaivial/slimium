@@ -33,7 +33,8 @@
 #define CG_ROOT "/sys/fs/cgroup"
 
 typedef struct { pid_t pid; unsigned long long start, ticks; } pinfo;
-typedef struct { char id[48]; long long last; int hib, attached, seen; long long entry; } tabrec;
+/* ours: we attached to it and have not seen our detach yet (its attach events are ours) */
+typedef struct { char id[48]; long long last; int hib, attached, seen, want, ours; long long entry; } tabrec;
 typedef struct { pid_t ppid; unsigned long long ticks, start; char state; char comm[16]; } pst;
 
 typedef struct {
@@ -50,6 +51,9 @@ typedef struct {
     int ntabs;
     long long quiet_until;    /* target events before this are our own doing */
     int reclaim_off;          /* kernel lacks memory.reclaim swappiness= */
+    char okcg[MAXCG][PATH_MAX / 4];  /* cgroup dirs reclaimed last time (adaptive trigger) */
+    int nok;
+    long post_kb;             /* their file pages right after that reclaim */
 } gov_t;
 
 static volatile sig_atomic_t g_stop;
@@ -297,6 +301,7 @@ static void reclaim(gov_t *g, slim_gov_pass *r) {
         if (!dup && ncg < MAXCG) memcpy(cgs[ncg++], c, sizeof c);
     }
     r->cgroups = ncg;
+    g->nok = 0; g->post_kb = 0;
     double abort_cpu = g->cfg->idle_cpu * 4 > 20 ? g->cfg->idle_cpu * 4 : 20;
     for (int k = 0; k < ncg; k++) {
         char dir[PATH_MAX - 32], rf[PATH_MAX];
@@ -332,6 +337,10 @@ static void reclaim(gov_t *g, slim_gov_pass *r) {
         long after = cg_file_kb(dir);
         if (before > 0 && after >= 0 && before > after) r->reclaimed_kb += before - after;
         r->cgroups_ok++;
+        if (after >= 0 && g->nok < MAXCG && strlen(dir) < sizeof g->okcg[0]) {
+            memcpy(g->okcg[g->nok++], dir, strlen(dir) + 1);
+            g->post_kb += after;
+        }
         ev_new(g, &e, "reclaim");
         ev_s(&e, "cgroup", cgs[k]); ev_kb(&e, "file_before", before); ev_kb(&e, "file_after", after);
         ev_i(&e, "chunks", chunks); ev_i(&e, "ms", now_ms() - t0);
@@ -341,6 +350,14 @@ static void reclaim(gov_t *g, slim_gov_pass *r) {
         ev_end(g, &e);
         if (stop) break;
     }
+}
+
+/* Growth of the file pages of the cgroups reclaimed last time (kB); -1 if unknown. */
+static long file_growth(gov_t *g) {
+    if (!g->nok) return -1;
+    long s = 0;
+    for (int i = 0; i < g->nok; i++) { long v = cg_file_kb(g->okcg[i]); if (v < 0) return -1; s += v; }
+    return s - g->post_kb;
 }
 
 /* ---- DevTools ---- */
@@ -407,14 +424,20 @@ static void tab_event(gov_t *g, jv m, jv pr) {
     tabrec *r = id ? tab_get(g, id, 1) : NULL;
     if (r) {
         r->seen = 1;
-        r->attached = json_get(ti, "attached", &a) && json_bool(a);
+        int att = json_get(ti, "attached", &a) && json_bool(a);
+        if (r->ours) { if (!att) r->ours = 0; }
+        else if (r->hib && att && !r->attached) r->want = 1;   /* a client came for it */
+        r->attached = att;
         if (t >= g->quiet_until) r->last = t;
-        if (r->hib && url && strcmp(url, "about:blank")) r->hib = 0;   /* someone navigated it */
+        /* someone else navigated it (our own about:blank navigation reports the old URL first) */
+        if (r->hib && t >= g->quiet_until && url && strcmp(url, "about:blank")) r->hib = 0;
     }
     free(id); free(url);
 }
 
-/* Sleep up to ms, handling target events when a persistent connection exists. */
+static int restore_tab(gov_t *g, tabrec *t);
+/* Sleep up to ms, handling target events when a persistent connection exists; a client attaching
+ * to a hibernated tab restores it at once. */
 static void pump(gov_t *g, int ms) {
     if (!(g->cfg->hibernate > 0 && g->cdp_open && g->cdp.open)) { sleep_ms(ms); return; }
     long long dl = now_ms() + ms;
@@ -427,19 +450,22 @@ static void pump(gov_t *g, int ms) {
         if (r == 0) return;
         tab_event(g, m, pr);
         free(msg);
+        for (int i = 0; i < g->ntabs; i++) if (g->tabs[i].want && g->tabs[i].hib) { restore_tab(g, &g->tabs[i]); break; }
     }
 }
 
 static int restore_tab(gov_t *g, tabrec *t) {
     char *sid = NULL, p[64];
     int ok = 0;
-    if (cdp_attach(&g->cdp, t->id, 5000, &sid) == 0) {
+    t->ours = 1;
+    if (cdp_attach(&g->cdp, t->id, 5000, &sid)) t->ours = 0;
+    else {
         snprintf(p, sizeof p, "{\"entryId\":%lld}", t->entry);
         ok = cdp_call(&g->cdp, sid, "Page.navigateToHistoryEntry", p, 5000, NULL, NULL) == 0;
         cdp_detach(&g->cdp, sid, 2000);
     }
     free(sid);
-    t->hib = 0; t->last = now_ms();
+    t->hib = t->want = 0; t->last = now_ms();
     g->quiet_until = now_ms() + 1500;
     ev_t e; ev_new(g, &e, "restore"); ev_s(&e, "tab", t->id); ev_i(&e, "ok", ok); ev_end(g, &e);
     return ok;
@@ -449,14 +475,15 @@ static int restore_tab(gov_t *g, tabrec *t) {
 static void restore_check(gov_t *g, int all) {
     if (g->cfg->hibernate <= 0 || (!all && now_ms() < g->quiet_until)) return;
     for (int i = 0; i < g->ntabs; i++)
-        if (g->tabs[i].hib && (all || g->tabs[i].attached) && cdp_up(g) == 0) restore_tab(g, &g->tabs[i]);
+        if (g->tabs[i].hib && (all || g->tabs[i].attached || g->tabs[i].want) && cdp_up(g) == 0) restore_tab(g, &g->tabs[i]);
 }
 
 static int hibernate_tab(gov_t *g, tabrec *t) {
     char *sid = NULL, *resp = NULL;
     jv res, ent;
     int ok = 0;
-    if (cdp_attach(&g->cdp, t->id, 5000, &sid)) return 0;
+    t->ours = 1;
+    if (cdp_attach(&g->cdp, t->id, 5000, &sid)) { t->ours = 0; return 0; }
     if (cdp_call(&g->cdp, sid, "Page.getNavigationHistory", NULL, 5000, &resp, &res) == 0) {
         char path[48];
         snprintf(path, sizeof path, "entries.%lld", (long long)json_get_num(res, "currentIndex", -1));
@@ -510,6 +537,7 @@ static void gc_pass(gov_t *g, slim_gov_pass *r) {
                     jv a;
                     tr->seen = 1; tr->attached = json_get(t, "attached", &a) && json_bool(a);
                 }
+                if (tr && !tr->hib) tr->ours = 1;
                 if (id && !(tr && tr->hib) && cdp_attach(&g->cdp, id, 5000, &sid) == 0) {
                     cdp_call(&g->cdp, sid, "Memory.simulatePressureNotification", crit, 5000, NULL, NULL);
                     if (cdp_call(&g->cdp, sid, "HeapProfiler.collectGarbage", NULL, 10000, NULL, NULL) == 0) r->tabs_gc++;
@@ -598,14 +626,19 @@ int slim_gov_run(slim_gov_cfg *cfg) {
     }
     ev_t e; ev_new(g, &e, "start");
     ev_i(&e, "port", cfg->port); ev_i(&e, "idle_ms", cfg->idle_ms); ev_d(&e, "idle_cpu", cfg->idle_cpu);
-    ev_i(&e, "reclaim_s", cfg->reclaim_s); ev_i(&e, "gc", cfg->gc); ev_i(&e, "hibernate", cfg->hibernate);
+    ev_i(&e, "reclaim_s", cfg->reclaim_s); ev_i(&e, "grow_mb", cfg->grow_mb); ev_i(&e, "min_s", cfg->min_s); ev_i(&e, "gc", cfg->gc); ev_i(&e, "hibernate", cfg->hibernate);
     { char c[512]; ev_s(&e, "cgroup", cg_of(cfg->root, c, sizeof c) ? NULL : c); }
     ev_end(g, &e);
+    /* busy_gc / busy_rec: CPU time (ms) the tree spent above idle_cpu since the last GC pass /
+     * reclaim. Chromium's own background blips (timers, refaults after a reclaim) stay below
+     * busy_ms, so they neither re-run the GC pass nor pull the next reclaim forward. */
     long long tprev = now_ms(), idle_since = now_ms(), last_reclaim = 0, grace_until = 0;
-    int gc_done = 0, reclaimed = 0, idle = 0;
+    double busy_gc = 1e9, busy_rec = 1e9;
+    int idle = 0;
     scan_tree(g);
     sample_cpu(g, &tprev);
     while (!g_stop) {
+        long long t0 = now_ms();
         pump(g, 1000);
         if (!alive_as(cfg->root, cfg->root_start)) break;
         long long t = now_ms();
@@ -614,22 +647,29 @@ int slim_gov_run(slim_gov_cfg *cfg) {
         restore_check(g, 0);
         if (t < grace_until) continue;
         if (cpu >= cfg->idle_cpu) {
+            double ms = cpu / 100.0 * (double)(t - t0);
+            busy_gc += ms; busy_rec += ms;
             if (idle) { ev_new(g, &e, "active"); ev_d(&e, "cpu", cpu); ev_end(g, &e); }
-            idle_since = t; gc_done = reclaimed = idle = 0;
+            idle_since = t; idle = 0;
             continue;
         }
         if (t - idle_since < cfg->idle_ms) continue;
-        if (!idle) { idle = 1; ev_new(g, &e, "idle"); ev_d(&e, "cpu", cpu); ev_end(g, &e); }
-        int gc = !gc_done && cfg->port >= 0 && (cfg->gc || cfg->hibernate > 0);
+        if (!idle) { idle = 1; ev_new(g, &e, "idle"); ev_d(&e, "cpu", cpu); ev_i(&e, "busy_ms", (long long)(busy_gc < 1e8 ? busy_gc : -1)); ev_end(g, &e); }
+        int gc = busy_gc >= cfg->busy_ms && cfg->port >= 0 && (cfg->gc || cfg->hibernate > 0);
         /* reclaim on a later tick than the GC pass, once its CPU has settled (grace) */
-        int rec = !gc && cfg->reclaim_s > 0 && !g->reclaim_off && (!reclaimed || t - last_reclaim >= (long long)cfg->reclaim_s * 1000);
+        int rec = !gc && cfg->reclaim_s > 0 && !g->reclaim_off &&
+                  (busy_rec >= cfg->busy_ms || t - last_reclaim >= (long long)cfg->reclaim_s * 1000);
+        long grown = -1;
+        if (!gc && !rec && cfg->reclaim_s > 0 && !g->reclaim_off && cfg->grow_mb > 0 &&
+            t - last_reclaim >= (long long)cfg->min_s * 1000 && (grown = file_growth(g)) >= (long)cfg->grow_mb * 1024)
+            rec = 2;   /* adaptive: the page cache came back */
         if (!gc && !rec) continue;
         slim_gov_pass r;
         do_pass(g, &r, gc, gc, rec, 0);
-        if (gc) gc_done = 1;
-        if (gc && cfg->reclaim_s > 0) grace_until = now_ms() + 2000;
-        if (rec) { reclaimed = 1; last_reclaim = now_ms(); }
-        grace_until = now_ms() + GRACE_MS;
+        if (gc) busy_gc = 0;
+        if (rec) { busy_rec = 0; last_reclaim = now_ms(); }
+        if (rec == 2) { ev_new(g, &e, "grown"); ev_kb(&e, "file_growth", grown); ev_end(g, &e); }
+        grace_until = now_ms() + (gc ? 2000 : GRACE_MS);
     }
     if (g_stop && alive_as(cfg->root, cfg->root_start)) restore_check(g, 1);
     ev_new(g, &e, "exit");
@@ -656,6 +696,9 @@ void slim_gov_defaults(slim_gov_cfg *g) {
     g->gc = (int)envl("SLIM_GOV_GC", 1, 0, 1);
     g->hibernate = (int)envl("SLIM_GOV_HIBERNATE", 0, 0, 1000);
     g->hib_min_s = (int)envl("SLIM_GOV_HIBERNATE_MIN_S", 120, 0, 86400 * 30);
+    g->busy_ms = (int)envl("SLIM_GOV_BUSY_MS", 1000, 0, 86400000);
+    g->grow_mb = (int)envl("SLIM_GOV_RECLAIM_GROW_MB", 24, 0, 1 << 20);
+    g->min_s = (int)envl("SLIM_GOV_RECLAIM_MIN_S", 5, 0, 86400);
     g->idle_cpu = 5;
     const char *c = getenv("SLIM_GOV_IDLE_CPU");
     double d;

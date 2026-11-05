@@ -30,6 +30,7 @@ int cmd_gov(ctx_t *c, int argc, char **argv) {
     const char *im = opt_val(c, &argc, argv, "--idle-ms");
     const char *ic = opt_val(c, &argc, argv, "--idle-cpu");
     const char *hb = opt_val(c, &argc, argv, "--hibernate");
+    const char *gm = opt_val(c, &argc, argv, "--grow-mb");
     int once = opt_flag(&argc, argv, "--once");
     int daemon = opt_flag(&argc, argv, "--daemon");
     int wait_engine = opt_flag(&argc, argv, "--wait-engine");
@@ -40,7 +41,7 @@ int cmd_gov(ctx_t *c, int argc, char **argv) {
     slim_gov_defaults(&g);
     int root = 0;
     if (num_opt(c, "--reclaim-s", rs, 0, 86400, &g.reclaim_s) || num_opt(c, "--idle-ms", im, 0, 86400000, &g.idle_ms) ||
-        num_opt(c, "--hibernate", hb, 0, 1000, &g.hibernate) || num_opt(c, "--pid", pid_s, 1, 1 << 30, &root))
+        num_opt(c, "--hibernate", hb, 0, 1000, &g.hibernate) || num_opt(c, "--grow-mb", gm, 0, 1 << 20, &g.grow_mb) || num_opt(c, "--pid", pid_s, 1, 1 << 30, &root))
         return -1;
     if (ic) {
         double d;
