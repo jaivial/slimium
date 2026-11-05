@@ -1,0 +1,10 @@
+# cu RAM comparison 2026-11-05T20:30:56+01:00 on fedora; runs=3 settle=5s
+# slim browser: /home/jaime/slimium-wt/cu-integration/tests/cu/slimium-chrome-standin.sh; cu: a857f14 fix: cu mark, cu console and cu upload work in the session's tab (they went to the default tab under the daemon)
+# flow: 10 fixture tabs + 3 real sites, one leased tab each, snapshot each
+# config run pss_kb rss_kb procs snapshots_ok
+slim-env 1 320359 1040100 8 13/13
+slim-env 2 320754 1041612 8 13/13
+slim-env 3 320931 1039968 8 13/13
+# median PSS (MB) of 3 runs:
+#   slim-env        313.2 MB
+# user's cu untouched
