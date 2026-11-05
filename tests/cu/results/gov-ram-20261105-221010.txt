@@ -1,0 +1,6 @@
+# gov-ram 2026-11-05T22:10:10+01:00 on fedora; settle=4s steady=150s (5 s samples); SLIM_PROFILE=balanced
+# slim browser: /home/jaime/.local/bin/slimium-chrome (5cf7ba8 gov: early reclaim triggered by file_mapped growth (not readahead cache), iso measurement in events opt-in (SLIM_GOV_MEASURE)); MB = iso (anon+shmem+file union) of the browser tree
+slim 1 settled_mb 556.2 (anon+shmem 281.6 file_union 274.6 procs 9) steady_min/med/max/twmean 310.9 320.2 556.2 328.0 active_peak 455.5 after30 362.8 snapshots 13/13 shots 13 gc_passes 1 reclaims 16 gov_cpu 00:00:01
+stock 1 settled_mb 586.5 (anon+shmem 311.4 file_union 275.2 procs 11) steady_min/med/max/twmean 533.7 536.7 586.5 544.4 active_peak 591.5 after30 591.8 snapshots 13/13 shots 13 gc_passes - reclaims - gov_cpu -
+slim 1 settled_mb 556.3 (anon+shmem 282.7 file_union 273.6 procs 9) steady_min/med/max/twmean 309.6 321.1 556.3 332.5 active_peak 455.9 after30 338.7 snapshots 13/13 shots 13 gc_passes 2 reclaims 16 gov_cpu 00:00:01
+# user's cu untouched

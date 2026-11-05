@@ -1,0 +1,4 @@
+# gov-ram 2026-11-05T22:50:26+01:00 on fedora; settle=4s steady=150s (5 s samples); SLIM_PROFILE=balanced
+# slim browser: /home/jaime/.local/bin/slimium-chrome (79d3839 gov-ram.sh: slim-nolite shim, action latency after reclaim); MB = iso (anon+shmem+file union) of the browser tree
+slim 1 settled_mb 492.2 (anon+shmem 225.7 file_union 266.5 procs 7) steady_min/med/max/twmean 262.9 269.7 492.2 276.3 active_peak 405.4 after30 287.3 snapshots 13/13 active_snapshots 13 shots 13 gc_passes 1 reclaims 26 hibernated 0 restored 0 gov_cpu 00:00:02 latency_ms(median/max) -
+# user's cu untouched

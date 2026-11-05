@@ -134,3 +134,95 @@ reclaim happens, nothing goes to stdout, and the governor exits with the engine.
 fingerprint (daemon/browser pids, listeners 8810-8834/9362-9386) is unchanged.
 
 cu suite through cu-slim with the governor live (`tests/cu/run.sh`): **71/71**.
+
+## Numbers (2026-11-05, Chromium 156.0.8078.79, Fedora 44, kernel 7.2, cu 1.9.0 + slimium-integration)
+
+**Through cu** (`tests/cu/gov-ram.sh`). Each run is a cu-slim daemon with a temp dir, 10 leased
+fixture tabs plus example.com, en.wikipedia.org/wiki/Web_browser and news.ycombinator.com, and a
+`cu snapshot` in each (13/13 every run). *Settled* = 4 s after the flow (the governor has not
+acted yet). *Steady* = 31 samples, 5 s apart over 150 s (min / median / max / time-weighted
+mean). *Active peak* = max of 1 s samples during an active pass (snapshot + screenshot of all 13
+tabs + one navigation). *After* = 30 s after that. iso is in MB, tree only (crashpad not
+included); the user's cu was running the whole time (fingerprint unchanged).
+
+| config | settled | steady min / median / max / tw-mean | active peak | after 30 s | reclaims / gov CPU |
+|---|---:|---|---:|---:|---|
+| stock-compat: stock ELF, `CU_MODE=compat` (plain Chromium) | 722 | 688 / 709 / 722 / 706 | 751 | 755 | - |
+| stock: stock ELF, cu fast mode (cu's own lean flags) | 582-587 | 520-534 / 520-537 / 558-587 / 525-544 (3 runs) | 534-592 | 539-592 | - |
+| **slimium balanced (main 2960a03) + governor** | 495 | **265 / 274 / 495 / 280** | 410 | 303 | 17 / 1 s in ~5 min |
+| same, balanced without `--lite-mode` | 497 | 264 / 275 / 497 / 279 | 416 | 300 | 21 / 2 s |
+| same, `SLIM_GOV_RECLAIM_GROW_MB=12` | 492 | 263 / 270 / 492 / 276 | 405 | 287 | 26 / 2 s |
+| slimium balanced (pre-merge profile) + governor | 547-556 | 310-311 / 318-321 / 553-556 / 328-336 (3 runs) | 456-475 | 333-363 | 16-33 |
+| same + `SLIM_GOV_HIBERNATE=3` | 561 | 317 / 324 / 561 / 334 | 468 | 341 | 0 tabs hibernated: cu keeps a client attached to its leased tabs |
+| pre-merge, two browsers sharing ONE engine copy (bug, fixed by slots) | 558 | 469 / 472 / 558 / 475 | 518 | 499 | - |
+
+Ratios of steady median / tw-mean (the "max" of steady is the settled sample at t=0, before the
+first idle pass):
+- vs **plain stock Chromium** through cu (compat, 709 / 706): **0.39x / 0.40x**.
+- vs **cu's fast-mode stock** (525 / 534 in the same session): **0.52x / 0.52x**. Without the
+  governor, slimium settles at 495 = 0.85x of 582 there. The governor is what takes it to 0.52x.
+- Active peak 410 vs 570 (0.72x). 30 s after activity 303, back to ~275 at the next reclaim.
+- `--lite-mode` makes no measurable difference on this cu flow with the governor (274 vs 275).
+  The flow is DOM- and layout-heavy, not JS-heavy.
+- A tighter growth trigger (12 MB) buys ~4 MB for twice the reclaims: not worth it as a default.
+
+**Action latency through cu** (5 rounds on the form tab, median / max ms; *cold* = right after a
+governor reclaim, stock = after 30 s idle; *warm* = immediately again):
+
+| | snapshot | click | shot |
+|---|---|---|---|
+| slimium cold (after reclaim) | 61 / 116 | 35 / 42 | 383 / 517 |
+| slimium warm | 4 / 5 | 4 / 4 | 489 / 490 |
+| stock cold (30 s idle) | 5 / 6 | 5 / 6 | 490 / 518 |
+| stock warm | 4 / 4 | 4 / 5 | 487 / 492 |
+
+The first action after a reclaim pays the refaults: +30-110 ms once. Screenshots (~0.4-0.5 s in
+cu on any browser) do not get slower.
+
+**Own sessions** (`slimium start`, same 13 tabs):
+- `gov --once`: iso 523.5 → 321.9 MB (pre-merge max profile); 471 → 260 MB (merged balanced).
+- Loop with the activity gate: right after each reclaim 340-356 MB, before the next one 358-440 MB
+  (pre-merge max, 30 s timer + first adaptive version).
+- **fadvise matters** (5 file:// tabs, merged balanced, the private copy slot reused after a
+  previous browser):
+  | | iso before → after one pass | file_union after |
+  |---|---|---|
+  | copy, no fadvise | 399 → 397 | 253 MB (cached pages still charged to the dead previous scope) |
+  | copy, fadvise | 398 → **205** | 62 MB |
+  | system ELF (user's cu and other agents run the same ELF) | 399 → 398 | 253 MB |
+  So the private copy and the fadvise are both needed on a shared machine. Without them the
+  governor does nothing for the file pages.
+- What stays after a reclaim (~60-120 MB of file pages): the engine's hot set (27-80 MB) and a
+  tail of system libraries (libc, glib, nss, icu, fonts) charged to other cgroups. Copying the paks
+  as well would not help (icudtl/resources.pak are ~2 MB resident).
+
+**Cost**: a reclaim takes 5-260 ms of kernel time in the governor (nice 10), ~16-20 per 5 minutes
+idle with the default trigger, ~0.3-0.6 % of one core in total. A pressure+GC pass over 14 tabs
+takes 0.35-0.45 s, once per idle period after real activity. The governor process has PSS
+0.4-0.55 MB and anon 0.3-0.42 MB; its RSS is 2.3-2.4 MB, of which ~2 MB is shared libc/ld pages
+(the same as any slimium command, whose peak RSS is 2.36 MB in tests/run.sh).
+
+## Caveats
+
+- **iso counts mapped pages only.** After a reclaim the browser's refaults also pull readahead
+  into the page cache. That cache is charged to the browser's scope but not mapped, so it is not
+  in iso (it is reclaimable and the next pass drops it). memory.stat `file` of the scopes can be
+  100-260 MB above what iso shows.
+- Pages the tree maps but that are charged to other cgroups (system libraries; the system ELF if
+  `SLIM_ENGINE_COPY=0`) are never reclaimed by design. On a machine where slimium is the only
+  Chromium, the system ELF would be reclaimable too.
+- The first cu action after a reclaim is ~30-110 ms slower (refaults from disk; NVMe here).
+- Two pressure+GC passes may hit a tab at a bad moment (a 10 s timeout per call, never
+  forciblyPurge). tests/gov.sh checks that the oldest of 51 tabs still evaluates and runs timers
+  afterwards.
+- Hibernation is off by default. cu keeps its leased tabs attached, so it never hibernates them,
+  and the first command after a restore can race it. It is meant for long-lived browsers with
+  many idle tabs and no attached clients.
+- The engine scopes are user systemd scopes: they leave cu-daemon.service's cgroup (as Chromium's
+  own app-org.chromium.Chromium-PID.scope already does), so `systemctl --user stop` of a
+  daemon's unit no longer kills the browser by cgroup. cu closes its browser itself, and the
+  zygote and renderers exit with it.
+- Up to 4 engine copies (`SLIM_ENGINE_COPIES`) of 322 MB each are reflinks on btrfs/xfs; on
+  ext4 they are real copies (~0.3 s and 322 MB of disk each, made once per engine version).
+- Needs cgroup v2, `memory.reclaim` with `swappiness=` (Linux >= 6.x) and a delegated user
+  slice (systemd). Without them the governor still does pressure + GC.
