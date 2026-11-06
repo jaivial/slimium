@@ -578,10 +578,78 @@ int interact_submit(ctx_t *c, int argc, char **argv) {
     out_s(c, "selector", argv[0]); out_t(c, "submitted %s", argv[0]); return 0;
 }
 
+static void mouse_params(char *p, size_t n, const char *type, double x, double y, const char *button, int clicks) {
+    snprintf(p, n, "{\"type\":\"%s\",\"x\":%.2f,\"y\":%.2f,\"button\":\"%s\",\"buttons\":%d,\"clickCount\":%d}",
+             type, x, y, button ? button : "none", button && !strcmp(button, "left") && !strcmp(type, "mousePressed") ? 1 : 0, clicks);
+}
+
+static int fast_click(ctx_t *c, const char *locator) {
+    double x, y;
+    if (locator_center(c, locator, &x, &y)) return -1;
+    long ids[3];
+    char p[256];
+    mouse_params(p, sizeof p, "mouseMoved", x, y, NULL, 0);
+    if (cdp_send(&c->cdp, c->sid, "Input.dispatchMouseEvent", p, &ids[0])) return -1;
+    mouse_params(p, sizeof p, "mousePressed", x, y, "left", 1);
+    if (cdp_send(&c->cdp, c->sid, "Input.dispatchMouseEvent", p, &ids[1])) return -1;
+    mouse_params(p, sizeof p, "mouseReleased", x, y, "left", 1);
+    if (cdp_send(&c->cdp, c->sid, "Input.dispatchMouseEvent", p, &ids[2])) return -1;
+    for (int i = 0; i < 3; i++) if (cdp_wait(&c->cdp, ids[i], c->sid, c->timeout, NULL, NULL)) return -1;
+    out_d(c, "x", x); out_d(c, "y", y); out_t(c, "clicked %s at %.0f,%.0f", locator, x, y);
+    return 0;
+}
+
+static int fast_fill(ctx_t *c, const char *locator, const char *text) {
+    if (!strncmp(locator, "@e", 2)) return cmd_fill(c, 2, (char *[]){(char *)locator, (char *)text});
+    char *resp; jv obj, val;
+    int rc = eval_locator(c, locator,
+      "if(e.scrollIntoViewIfNeeded)e.scrollIntoViewIfNeeded(true);e.focus();"
+      "if('value' in e&&e.tagName!=='SELECT'){e.select&&e.select();e.value='';e.dispatchEvent(new Event('input',{bubbles:true}))}"
+      "else if(e.isContentEditable){var g=document.createRange();g.selectNodeContents(e);var w=getSelection();w.removeAllRanges();w.addRange(g);document.execCommand('delete')}"
+      "return document.activeElement===e||e.contains(document.activeElement)", &resp, &obj);
+    if (rc) return -1;
+    int focused = json_get(obj, "value", &val) && json_bool(val);
+    free(resp);
+    if (!focused) return slim_seterr("element %s cannot be focused", locator);
+    sbuf b = {0};
+    interact_js_sel(&b, locator,
+      "e.dispatchEvent(new Event('change',{bubbles:true}));var pw=e.type==='password',hv='value' in e;"
+      "return [pw,hv,pw?null:hv?e.value:e.innerText]", 1);
+    sbuf ep = {0}; sb_puts(&ep, "{\"expression\":"); sb_jstrz(&ep, b.p);
+    sb_puts(&ep, ",\"returnByValue\":true,\"awaitPromise\":true,\"userGesture\":true}");
+    sb_free(&b);
+    long insert_id = 0, eval_id;
+    if (*text) {
+        sbuf p = {0}; sb_puts(&p, "{\"text\":"); sb_jstrz(&p, text); sb_putc(&p, '}');
+        rc = cdp_send(&c->cdp, c->sid, "Input.insertText", p.p, &insert_id); sb_free(&p);
+        if (rc) { sb_free(&ep); return -1; }
+    }
+    rc = cdp_send(&c->cdp, c->sid, "Runtime.evaluate", ep.p, &eval_id); sb_free(&ep);
+    if (rc) return -1;
+    if (insert_id && cdp_wait(&c->cdp, insert_id, c->sid, c->timeout, NULL, NULL)) return -1;
+    jv res;
+    if (cdp_wait(&c->cdp, eval_id, c->sid, c->timeout, &resp, &res)) return -1;
+    if (exception_result(res)) { free(resp); return -1; }
+    if (!json_get(res, "result.value", &val) || val.t != J_ARR) { free(resp); return slim_seterr("fill verification failed"); }
+    int password = json_get_num(val, "0", 0) != 0 || jobool(val, "0");
+    int has_value = json_get_num(val, "1", 0) != 0 || jobool(val, "1");
+    char *value = json_get_str(val, "2");
+    if (!password && has_value && (!value || strcmp(value, text))) {
+        free(value); free(resp);
+        return cmd_fill(c, 2, (char *[]){(char *)locator, (char *)text});
+    }
+    if (!password && value) out_s(c, "value", value);
+    out_s(c, "selector", locator); out_t(c, "filled %s", locator);
+    free(value); free(resp); return 0;
+}
+
 static int invoke_capture(ctx_t *c, int argc, char **argv, sbuf *json) {
     sbuf oldj = c->oj, oldt = c->ot; int usage = c->usage;
     memset(&c->oj, 0, sizeof c->oj); memset(&c->ot, 0, sizeof c->ot);
-    int rc = cli_invoke(c, argc, argv);
+    int rc;
+    if (argc == 2 && !strcmp(argv[0], "click")) rc = fast_click(c, argv[1]);
+    else if (argc == 3 && !strcmp(argv[0], "fill")) rc = fast_fill(c, argv[1], argv[2]);
+    else rc = cli_invoke(c, argc, argv);
     *json = c->oj; sb_free(&c->ot); c->oj = oldj; c->ot = oldt; c->usage = usage; return rc;
 }
 

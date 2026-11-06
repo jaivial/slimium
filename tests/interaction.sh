@@ -49,7 +49,8 @@ URL="http://127.0.0.1:$HPORT/interact.html"
 
 echo "== slimium interaction tests (CDP $PORT, HTTP $HPORT) =="
 t help 0 'snapshot|find|pipe' help
-t start 0 'started session' start --port "$PORT" --user-data-dir "$UDD" --no-gov --window 1000x700 || exit 1
+run start 0 start --port "$PORT" --user-data-dir "$UDD" --no-gov --window 1000x700 || { echo "cannot start interaction browser"; exit 1; }
+check start 'started session'
 t nav 0 'Interaction fixture' nav "$URL"
 t snapshot 0 '@e[0-9]+ button "Save"' snapshot --interactive
 run snapshot-json 0 --json snapshot --interactive --max 5
@@ -62,6 +63,7 @@ t snapshot-scope 0 'frame=0' snapshot --selector '#myform' --max 30
 ok snapshot-scope-no-frame "! grep -q 'frame=0/' "$OUT/out"" "selector escaped its scope"
 t snapshot-all 0 'Hidden action.*visible=false' snapshot --all --max 100
 ok state-mode '[ "$(stat -c %a "$STATE/$SES.interact.json")" = 600 ] && [ "$(stat -c %a "$STATE")" = 700 ]' "ref state is not 0600/0700"
+ok state-no-password "! grep -q DO_NOT_DISCLOSE "$STATE/$SES.interact.json"" "password persisted in ref metadata"
 
 t find-role 0 '^@e[0-9]+ button "Save"' find 'role=button[name="Save"]'
 SAVE=$(cut -d' ' -f1 "$OUT/out")
@@ -114,6 +116,7 @@ import json
 json.dump({'testid=username':'Dora','label=Agree terms':True,'label=Color':'Green','label=Biography':'form fill'},open('$OUT/form.json','w'))
 PY
 t form-fill 0 'filled 4 fields' form fill "@$OUT/form.json"
+t form-fill-effect 0 '"name":"Dora".*"bio":"form fill".*"checked":true.*"color":"g"' --json eval '({name:document.querySelector("#name").value,bio:document.querySelector("#bio").value,checked:document.querySelector("#agree").checked,color:document.querySelector("#color").value})'
 printf one >"$OUT/a.txt"; printf two >"$OUT/b.txt"
 t upload 0 'uploaded 2 files' upload label=Attachments "$OUT/a.txt" "$OUT/b.txt"
 t upload-effect 0 'files 2' text '#result'
@@ -137,7 +140,7 @@ json.dump([{'action':'click','locator':'#missing-act'},{'action':'eval','js':'1+
 PY
 t act 0 '"actions":4,"failures":1' --timeout 500 --json act "@$OUT/act.json"
 check act-index '"index":1,"action":"click","ok":false,"error"'
-check act-continue '"index":2,"action":"eval","ok":true'
+check act-continue '"index":2,"action":"eval","ok":true,"value":"saved 1"'
 t act-stop 0 '"actions":1,"failures":1' --timeout 300 --json act --stop-on-error "@$OUT/act-stop.json"
 t act-final-snapshot 0 '"snapshot":{"count":' --json act --snapshot '[{"action":"eval","js":"1+2"}]'
 t act-malformed 1 '' act '{}'
@@ -146,13 +149,18 @@ t act-recursive 0 '"failures":1' --json act '[{"action":"pipe"}]'
 t pipe-recursion 0 '"ok":false.*recursive pipe' pipe <<<'{"id":9,"cmd":"pipe"}'
 TAB=$("$BIN" --session "$SES" --json tabs | python3 -c 'import json,sys;print(next(x["id"] for x in json.load(sys.stdin)["tabs"] if x["current"]))')
 export TEST_BIN="$BIN" TEST_SES="$SES" TAB
-ok pipe-stream "python3 - <<'PY'
+if python3 - <<'PY'
 import json,os,subprocess
 p=subprocess.Popen([os.environ['TEST_BIN'],'--session',os.environ['TEST_SES'],'pipe'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,bufsize=1)
 def req(x):
     p.stdin.write(json.dumps(x,separators=(',',':'))+'\n');p.stdin.flush()
     return json.loads(p.stdout.readline())
 p.stdin.write('not json\n');p.stdin.flush();assert json.loads(p.stdout.readline())['ok'] is False
+before_response=req({'cmd':'eval','args':['window.clicks||0']});assert before_response.get('value') is not None,before_response;before=before_response['value']
+assert req({'cmd':'click','args':['#save']})['ok']
+after_response=req({'cmd':'eval','args':['window.clicks||0']});assert after_response.get('value') is not None,after_response;after=after_response['value'];assert after==before+1,(before,after,after_response)
+fill_response=req({'cmd':'fill','args':['#name','Pipeline']});assert fill_response.get('ok'),fill_response
+value_response=req({'cmd':'eval','args':['document.querySelector("#name").value']});assert value_response.get('value')=='Pipeline',value_response
 for i in range(100):
     d=req({'id':i,'cmd':'eval','args':[str(i)+'+1']})
     assert d['id']==i and d['ok'] and d['value']==i+1,(i,d)
@@ -160,7 +168,13 @@ d=req({'id':'argv','argv':['eval','6*7','--timeout','1000']});assert d['value']=
 d=req({'id':'tab','cmd':'eval','args':['location.href','--tab',os.environ['TAB']]});assert d['ok'],d
 d=req({'cmd':'pipe'});assert not d['ok'] and 'recursive' in d['error'],d
 p.stdin.close();assert p.wait(timeout=5)==0
-PY" "100-request NDJSON streaming/flush/options failed"
+PY
+then
+    pass=$((pass+1))
+else
+    echo "FAIL [pipe-stream] 100-request NDJSON streaming/flush/options failed"
+    fail=$((fail+1))
+fi
 
 t stale-setup 0 'Interaction fixture' nav "$URL"
 t stale-find 0 'Save' find 'role=button[name="Save"]'

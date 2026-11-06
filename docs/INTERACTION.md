@@ -117,7 +117,10 @@ pipe/batch/MCP requests are rejected. EOF exits successfully, even if individual
 
 The same `ctx_t`, CDP websocket, attached target and Runtime/domain state are reused. Main-frame
 refs need no target-list or backend-node round trip; frame context and owner-node lookups are only
-used for iframe work and remain document-scoped.
+used for iframe work and remain document-scoped. Act/pipe clicks pipeline their ordered mouse
+events; ordinary main-frame fills pipeline insertion with the change/readback evaluation and
+verify the resulting value, falling back to synchronous insertion if a readback races. Actionability
+checks and error responses are retained.
 
 ## Testing and benchmark
 
