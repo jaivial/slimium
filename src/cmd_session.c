@@ -173,6 +173,10 @@ static int port_free(int port) {
     if (fd < 0) return 0;
     struct sockaddr_in a; memset(&a, 0, sizeof a);
     a.sin_family = AF_INET; a.sin_port = htons((uint16_t)port); a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    /* like Chromium's own listener: TIME_WAIT left by a connection the browser closed first (e.g.
+     * the keeper's, when the browser was killed) does not make the port busy, a listener does */
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
     int ok = bind(fd, (struct sockaddr *)&a, sizeof a) == 0;
     close(fd);
     return ok;

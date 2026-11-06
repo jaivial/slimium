@@ -20,7 +20,7 @@ LIBSRCS := src/util.c src/json.c src/b64.c src/ws.c
 HDRS := $(wildcard src/*.h)
 
 .PHONY: all test test-modules test-cu test-asan test-gov unit clean install uninstall asan bench size
-MODULE_TESTS := tests/profiles.sh tests/interaction.sh tests/media.sh tests/protocol.sh tests/mcp.sh
+MODULE_TESTS := tests/profiles.sh tests/interaction.sh tests/media.sh tests/protocol.sh tests/mcp.sh tests/emulation.sh
 all: slimium slimium-chrome
 
 $(BUILD)/%.o: src/%.c $(HDRS) | $(BUILD)

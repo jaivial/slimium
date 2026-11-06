@@ -216,7 +216,11 @@ static int hold_read(const char *session, hfile *h) {
     return rc;
 }
 
-int hold_enabled(void) { const char *e = getenv("SLIM_HOLD"); return !(e && !strcmp(e, "0")); }
+/* SLIM_HOLD=0 disables the keeper; so does SLIM_NO_PROC=1 (no usable /proc to validate it) */
+int hold_enabled(void) {
+    const char *e = getenv("SLIM_HOLD"), *np = getenv("SLIM_NO_PROC");
+    return !(e && !strcmp(e, "0")) && !(np && !strcmp(np, "1"));
+}
 
 int hold_owner(const char *session, int *gen) {
     hfile h;
