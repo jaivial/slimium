@@ -1,5 +1,6 @@
 /* Context, option parsing, output and connection helpers shared by commands. */
 #include "cmd.h"
+#include "interact.h"
 #include <dirent.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -295,6 +296,8 @@ int ctx_eval_in(ctx_t *c, const char *sid, const char *expr, char **resp, jv *ro
 }
 
 int ctx_eval(ctx_t *c, const char *expr, char **resp, jv *robj) {
+    int ref = interact_eval_ref(c, expr, resp, robj);
+    if (ref) return ref < 0 ? -1 : 0;
     if (ctx_page(c)) return -1;
     return ctx_eval_in(c, c->sid, expr, resp, robj);
 }
@@ -311,13 +314,7 @@ int ctx_wait_load(ctx_t *c, const char *events, int ms) {
 void js_str(sbuf *b, const char *s) { sb_jstrz(b, s); }
 
 static void js_sel(sbuf *b, const char *sel, const char *body, int must) {
-    sb_puts(b, "(function(){var s=");
-    sb_jstrz(b, sel);
-    sb_puts(b, ";var e;if(/^(xpath=|\\/\\/|\\(\\/\\/)/.test(s)){e=document.evaluate(s.indexOf('xpath=')==0?s.slice(6):s,"
-               "document,null,9,null).singleNodeValue}else e=document.querySelector(s);");
-    if (must) sb_puts(b, "if(!e)throw new Error('no element matches selector '+s);");
-    sb_puts(b, body);
-    sb_puts(b, "})()");
+    interact_js_sel(b, sel, body, must);
 }
 void js_el(sbuf *b, const char *sel, const char *body) { js_sel(b, sel, body, 1); }
 void js_find(sbuf *b, const char *sel, const char *body) { js_sel(b, sel, body, 0); }
