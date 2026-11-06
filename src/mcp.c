@@ -756,5 +756,3 @@ int slim_mcp_serve(ctx_t *c, const char *memory_profile) {
     if (s.close_log) fclose(s.log);
     return result;
 }
-
-
