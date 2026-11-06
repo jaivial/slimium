@@ -19,6 +19,7 @@ override it (tests always use a fresh temporary override). Its layout is:
 <root>/.current              default selected by 'profile use' (optional)
 <root>/NAME/profile.json     mode 0600; preferences and optional tab snapshot
 <root>/NAME/data/            mode 0700; Chromium --user-data-dir
+<root>/NAME/data/Default/Preferences 0600; Chromium settings, session restore enabled
 ```
 
 The root and profile directories are mode 0700. Metadata and default-selection updates use a locked,
@@ -71,11 +72,34 @@ also records `user`, so subsequent CLI commands do not need to repeat it. Renami
 active profile is rejected. Renaming an inactive profile moves its data and updates the default;
 deletion requires `--yes`, stays below the validated registry root, and never follows symlinks.
 
+## Session cookies and Chromium session restore
+
+Named profiles also enable Chromium's `session.restore_on_startup=1` in
+`data/Default/Preferences`. slimium preserves every other top-level and nested preference and
+atomically replaces the file at mode 0600. If the setting is already enabled, the file is only read.
+This is required for **session cookies** (cookies without `Max-Age` or `expires`): on a graceful
+`Browser.close`, Chromium writes them into its own session state and restores them into the default
+browser context on the next start. Persistent cookies, localStorage, and IndexedDB continue to use
+Chromium's normal durable stores.
+
+There is no slimium cookie checkpoint, no cookie value in `profile.json`, logs, or command output,
+and no background helper. The mechanism works in `slimium start` and `slimium-chrome`, including
+with `SLIM_GOV=0`. Off-the-record/isolated browser contexts are not populated from the default
+context's restored session.
+
+Chromium's preference also restores tabs, which is independent of cookie persistence:
+
+- ordinary `slimium start --user NAME` closes those automatically restored tabs and keeps the
+  established single `about:blank`, so existing startup behavior does not change;
+- `slimium start --user NAME -- --restore-last-session` explicitly requests Chromium's tab restore
+  and disables that pruning;
+- `slimium-chrome` does not prune tabs, so a cu-slim daemon restart can restore pages as well as
+  login state. Use cu's `tabs` command to inspect them.
+
 ## Save and restore tabs
 
 Persistent login state does **not** require `profile save`: it already lives in Chromium's data
-directory and survives a graceful browser or daemon restart. `save` is a separate, explicit tab
-snapshot:
+directory and session state. `save` is a separate, explicit tab snapshot:
 
 - record each open page's URL, the session's current page, and scroll X/Y;
 - do not record cookies, form contents, storage values, or target IDs (IDs are not stable across
@@ -89,23 +113,40 @@ an arbitrary running session. A crash can lose an unsaved tab snapshot and in-fl
 
 ## cu-slim / `slimium-chrome`
 
-Create the profile once, then pass its name through the isolated cu-slim launcher environment:
+Create the profile once, then set the name in the **daemon's** environment so its browser inherits
+it. cu 1.9.0 has no `cu-slim stop`; do not use legacy `cu-slim start` for this lifecycle. A
+separately managed, verified shell lifecycle is:
 
 ```sh
 slimium profile create instagram
-SLIM_USER_PROFILE=instagram cu-slim start
-```
-
-Equivalently, configure `SLIM_USER_PROFILE=instagram` in the launcher/service environment and
-restart cu-slim normally. For a shell-managed isolated deployment:
-
-```sh
+export CU_SLIM_HOME="$HOME/.local/share/cu-slim"
+export CU_SLIM_PORT=8790
+export CU_SLIM_CDP_PORT=9390
+export CU_SLIM_BROWSER="$PWD/slimium-chrome"
 export SLIM_USER_PROFILE=instagram
-cu-slim start
-# ... agent work; login state remains in the named Chromium data dir ...
-cu-slim stop
-SLIM_USER_PROFILE=instagram cu-slim start
+mkdir -p "$CU_SLIM_HOME"
+
+setsid cu-slim daemon >"$CU_SLIM_HOME/daemon.log" 2>&1 </dev/null &
+CU_SLIM_PID=$!
+# Wait only for the 8790 and 9390 TCP listeners, then verify:
+cu-slim diagnostics
+cu-slim navigate https://example.com
+# ... agent work; session and persistent login state stay in the named profile ...
+
+# Graceful browser close first, then stop only the daemon PID recorded above.
+slimium --port "$CU_SLIM_CDP_PORT" cdp Browser.close || true
+kill -TERM "$CU_SLIM_PID"
+wait "$CU_SLIM_PID"
+
+# Restart a new recorded daemon with the same environment.
+setsid cu-slim daemon >"$CU_SLIM_HOME/daemon.log" 2>&1 </dev/null &
+CU_SLIM_PID=$!
+# Again wait for both TCP listeners before issuing CLI commands.
 ```
+
+Do not use `cu-slim status` in a readiness loop: a CLI invocation before the daemon exists can
+auto-start an unrecorded daemon. The test suite waits for TCP listeners and calls `diagnostics`
+only afterwards. On shell exit or SIGINT/SIGTERM, tests close only their recorded browser and daemon.
 
 When `slimium-chrome` has `SLIM_USER_PROFILE` set, it replaces **every** caller-supplied
 `--user-data-dir` (including cu's temporary/default directory) with the canonical named data dir.
@@ -121,11 +162,16 @@ required.
 
 - **Graceful close:** `slimium stop` first sends `Browser.close` and waits for Chromium to flush
   cookies and storage. TERM/KILL remain the existing bounded fallbacks if the engine does not exit.
-  Close cu-slim through its normal stop path for the same reason.
-- **Crash semantics:** durable cookie/localStorage/IndexedDB transactions generally survive SIGKILL,
-  but a crash can lose recently buffered writes, session-only state, open tabs, scroll positions,
-  and an unsaved `profile save` snapshot. Use persistent (`Max-Age`/expires) cookies as the site
-  permits and stop gracefully when durability matters.
+  For cu-slim, use the explicit `Browser.close` + recorded-daemon SIGTERM sequence above; there is
+  no `cu-slim stop`.
+- **Crash semantics:** durable persistent-cookie/localStorage/IndexedDB transactions generally
+  survive SIGKILL, but a crash can lose recently buffered writes, **session cookies**, open tabs,
+  scroll positions, and an unsaved `profile save` snapshot. Session-cookie persistence is tested
+  and supported across graceful closes, not promised after an arbitrary crash. Use persistent
+  (`Max-Age`/expires) cookies when the site permits and close gracefully when durability matters.
+- **Tab restore:** the Chromium preference may restore tabs after restart. Only named slimium starts
+  prune them by default, and an explicit `-- --restore-last-session` always preserves them.
+  `profile restore` does not reconstruct browser history, form contents, or target IDs.
 - **One browser per named profile:** slimium checks live process command lines and refuses a second
   browser already using the same named data dir. Chromium's own profile singleton lock remains the
   race-safe backstop if two starts pass the check simultaneously. Different named profiles have
@@ -135,7 +181,7 @@ required.
   does not manage keys. Protect the whole data dir and registry backups. A headless host without an
   OS keyring may have different at-rest protection.
 - **No secret export:** registry commands do not print browser storage. `profile show` does print
-  saved URLs and preferences. Chromium data files are not displayed or parsed by these commands.
+  saved URLs and preferences. Chromium cookie/session database values are never read by slimium.
 - **Real sites:** tests use only a local fixture, never Instagram/Google or a logged-in personal
   browser. The same mechanism applies to real login state because those sites also persist identity
   in Chromium cookies and origin storage below the data dir. Site-specific encryption, expiring
@@ -151,15 +197,31 @@ make -j2
 tests/profiles.sh
 ```
 
-It uses fresh temporary roots, CDP 9450-9453, and a loopback fixture server on 9469 by default. It
-checks registry validation/permissions/no-secret output, graceful persistence of a persistent test
-cookie + localStorage + IndexedDB, SIGKILL recovery of only its recorded browser process group,
-profile isolation and duplicate rejection, two-tab/current-tab/scroll save-restore, two
-`SLIM_USER_PROFILE` wrapper restarts with conflicting cu-style data dirs, and no-follow deletion.
+It uses fresh temporary roots, CDP 9450-9453, and a loopback fixture server on 9469. It checks
+registry validation/permissions/no-secret output, preference preservation and modes, graceful
+session-cookie + persistent-cookie + localStorage + IndexedDB persistence, SIGKILL recovery of only
+its recorded browser process group, profile isolation and duplicate rejection, explicit and saved
+tab restoration, two `SLIM_USER_PROFILE` wrapper restarts with conflicting cu-style data dirs, and
+no-follow deletion.
+
+When the optional deployed `~/.local/bin/cu-slim` integration is available, the suite also starts
+its own daemon on HTTP 8792 and CDP 9392 with a fresh temporary `CU_SLIM_HOME` and fixture HTTP
+9467. It performs a real `Browser.close` + daemon restart and parses cu's nested JSON response.
+Missing cu-slim prints an explicit skip; `SLIM_PROFILE_SKIP_CU=1 tests/profiles.sh` skips that
+integration deliberately. Occupied required ports fail before any process is launched.
 
 One development run (Chromium 156, `--no-gov`, single samples rather than benchmark medians)
 reported: start 225 ms, graceful stop 52 ms, named reopen 232 ms, two-tab restore 64 ms, registry
 `profile list` maximum RSS 1880 KB, and stripped binary 151104 bytes. The baseline at commit
 `62b1866` was 134648 bytes, an increase of 16456 bytes (12.2%). Across five common `version`
 invocations, median maximum RSS was 1744 KB baseline versus 1816 KB current (+72 KB); median
-`profile list` RSS was 1696 KB. The script prints fresh latency/RSS/size measurements on every run.
+`profile list` RSS was 1696 KB.
+
+The session-cookie follow-up added no helper process and no measured stripped-size increase over
+integrated main `7c6e612` (188016 bytes before and after). Five `version` runs had median maximum
+RSS 1788 KB baseline versus 1792 KB current (+4 KB). Twenty-five `profile show` runs had median
+latency 0.497 ms baseline versus 0.490 ms current, i.e. no measurable preference-read regression.
+The script prints fresh lifecycle latency/RSS/size measurements, including real cu stop/restart
+timings, on every run. A final integrated run measured 281 ms named start, 53 ms graceful stop,
+339 ms named reopen, 51 ms saved-tab restore, 105 ms real cu browser-close/daemon stop, and 314 ms
+cu restart-to-diagnostics. These are whole lifecycle times, not incremental preference overhead.

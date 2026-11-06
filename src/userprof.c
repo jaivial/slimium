@@ -401,6 +401,80 @@ int userprof_delete(const char *name) {
     return r;
 }
 
+
+/* Chromium persists session cookies only when its own session restore is enabled.
+ * Patch just that preference, preserving every other Chromium preference and never
+ * reading or writing cookie storage ourselves. */
+static void pref_member(sbuf *b, jv key, jv val, int *count) {
+    if ((*count)++) sb_putc(b, ',');
+    sb_add(b, key.p, key.n); sb_putc(b, ':'); sb_add(b, val.p, val.n);
+}
+
+static void pref_session(sbuf *b, jv session) {
+    sb_putc(b, '{');
+    int count = 0, found = 0;
+    if (session.t == J_OBJ) {
+        size_t pos = 0; jv key, val;
+        while (json_next(session, &pos, &key, &val)) {
+            if (json_str_eq(key, "restore_on_startup")) {
+                jv one = {"1", 1, J_NUM};
+                pref_member(b, key, one, &count); found = 1;
+            } else pref_member(b, key, val, &count);
+        }
+    }
+    if (!found) {
+        jv key = {"\"restore_on_startup\"", 20, J_STR}, one = {"1", 1, J_NUM};
+        pref_member(b, key, one, &count);
+    }
+    sb_putc(b, '}');
+}
+
+static int enable_session_restore(const char *data) {
+    char def[PATH_MAX], path[PATH_MAX];
+    int n = snprintf(def, sizeof def, "%s/Default", data);
+    if (n < 0 || (size_t)n >= sizeof def) return slim_seterr("Chromium profile path too long");
+    n = snprintf(path, sizeof path, "%s/Preferences", def);
+    if (n < 0 || (size_t)n >= sizeof path) return slim_seterr("Chromium preferences path too long");
+    if (mkdir(def, 0700) && errno != EEXIST) return slim_seterr("create Chromium Default profile: %s", strerror(errno));
+    struct stat st;
+    if (lstat(def, &st) || !S_ISDIR(st.st_mode)) return slim_seterr("Chromium Default profile is not a real directory");
+    if (chmod(def, 0700)) return slim_seterr("secure Chromium Default profile: %s", strerror(errno));
+    char *doc = NULL; size_t len = 0;
+    if (lstat(path, &st) == 0) {
+        if (!S_ISREG(st.st_mode)) return slim_seterr("Chromium Preferences is not a regular file");
+        if (read_file(path, &doc, &len, 16u << 20)) return -1;
+    } else if (errno != ENOENT) return slim_seterr("inspect Chromium Preferences: %s", strerror(errno));
+    if (!doc) {
+        static const char initial[] = "{\"session\":{\"restore_on_startup\":1}}\n";
+        return atomic_write(path, initial, sizeof initial - 1);
+    }
+    jv d, enabled;
+    if (json_parse(doc, len, &d) || d.t != J_OBJ) {
+        free(doc); return slim_seterr("cannot enable session persistence: invalid Chromium Preferences");
+    }
+    if (json_get(d, "session.restore_on_startup", &enabled) && json_num(enabled, 0) == 1) {
+        free(doc); return 0;
+    }
+    sbuf b = {0}; sb_putc(&b, '{');
+    size_t pos = 0; jv key, val; int count = 0, found = 0;
+    while (json_next(d, &pos, &key, &val)) {
+        if (json_str_eq(key, "session")) {
+            if (count++) sb_putc(&b, ',');
+            sb_add(&b, key.p, key.n); sb_putc(&b, ':');
+            pref_session(&b, val); found = 1;
+        } else pref_member(&b, key, val, &count);
+    }
+    if (!found) {
+        if (count++) sb_putc(&b, ',');
+        sb_puts(&b, "\"session\":");
+        jv empty = {"{}", 2, J_OBJ}; pref_session(&b, empty);
+    }
+    sb_puts(&b, "}\n");
+    int r = atomic_write(path, b.p, b.n);
+    sb_free(&b); free(doc);
+    return r;
+}
+
 int userprof_data_dir(const char *name, char *buf, size_t cap) {
     userprof_t p;
     if (userprof_load(name, &p)) return -1;
@@ -419,7 +493,7 @@ int userprof_data_dir(const char *name, char *buf, size_t cap) {
     if (!realpath(data, resolved)) return slim_seterr("resolve user profile data: %s", strerror(errno));
     int n = snprintf(buf, cap, "%s", resolved);
     if (n < 0 || (size_t)n >= cap) return slim_seterr("user profile data path too long");
-    return 0;
+    return enable_session_restore(buf);
 }
 
 int userprof_save_pages(const char *name, const char *pages_json, int current_index, const char *current_url) {
