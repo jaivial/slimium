@@ -8,7 +8,10 @@ static int cmd_mcp(ctx_t *c, int argc, char **argv) {
     if (argc) return usage_err(c, "mcp takes no positional arguments");
     if (profile && slim_profile_parse(profile) < 0)
         return usage_err(c, "bad --profile '%s' (off|balanced|max)", profile);
-    return slim_mcp_serve(c, profile);
+    int rc = slim_mcp_serve(c, profile);
+    /* main.c's ordinary CLI emitter must not add a non-JSON-RPC line at EOF. */
+    sb_reset(&c->oj); sb_reset(&c->ot); c->json = 0;
+    return rc;
 }
 
 static const cmd_def MCP_COMMANDS[] = {

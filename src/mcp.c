@@ -411,7 +411,7 @@ static void format_invoke(ctx_t *c, const invoke_result *ir, sbuf *out) {
 
 static unsigned be16(const unsigned char *p) { return ((unsigned)p[0] << 8) | p[1]; }
 static unsigned le16(const unsigned char *p) { return ((unsigned)p[1] << 8) | p[0]; }
-static unsigned be24(const unsigned char *p) { return ((unsigned)p[0] << 16) | ((unsigned)p[1] << 8) | p[2]; }
+static unsigned le24(const unsigned char *p) { return ((unsigned)p[2] << 16) | ((unsigned)p[1] << 8) | p[0]; }
 static unsigned be32(const unsigned char *p) { return ((unsigned)be16(p) << 16) | be16(p + 2); }
 static void image_dimensions(const char *path, unsigned *width, unsigned *height) {
     *width = *height = 0;
@@ -422,7 +422,7 @@ static void image_dimensions(const char *path, unsigned *width, unsigned *height
         *width = be32(d + 16); *height = be32(d + 20);
     } else if (n >= 30 && !memcmp(d, "RIFF", 4) && !memcmp(d + 8, "WEBP", 4)) {
         if (!memcmp(d + 12, "VP8X", 4)) {
-            *width = be24(d + 24) + 1; *height = be24(d + 27) + 1;
+            *width = le24(d + 24) + 1; *height = le24(d + 27) + 1;
         } else if (!memcmp(d + 12, "VP8L", 4) && d[20] == 0x2f) {
             *width = 1 + d[21] + ((d[22] & 0x3f) << 8);
             *height = 1 + (d[22] >> 6) + (d[23] << 2) + ((d[24] & 0x0f) << 10);
