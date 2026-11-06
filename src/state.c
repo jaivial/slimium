@@ -44,7 +44,7 @@ void state_set(char **f, const char *v) { free(*f); *f = v ? xstrdup(v) : NULL; 
 
 void state_free(slim_state *s) {
     free(s->name); free(s->ws); free(s->target); free(s->profile); free(s->user); free(s->udd);
-    free(s->engine); free(s->log); free(s->ua); free(s->block); free(s->dldir);
+    free(s->engine); free(s->log); free(s->ua); free(s->block); free(s->dldir); free(s->ua_preset); free(s->dlg);
     memset(s, 0, sizeof *s);
 }
 
@@ -73,7 +73,12 @@ int state_load(const char *session, slim_state *s) {
     s->vp_h = (int)json_get_num(d, "vp_h", 0);
     s->vp_scale = json_get_num(d, "vp_scale", 0);
     s->vp_mobile = (int)json_get_num(d, "vp_mobile", 0);
+    s->vp_orient = (int)json_get_num(d, "vp_orient", 0);
+    s->vp_touch = (int)json_get_num(d, "vp_touch", 0);
+    s->gen = (int)json_get_num(d, "gen", 0);
     s->ua = json_get_str(d, "ua");
+    s->ua_preset = json_get_str(d, "ua_preset");
+    s->dlg = json_get_str(d, "dlg");
     s->offline = (int)json_get_num(d, "offline", 0);
     jv b;
     if (json_get(d, "block", &b) && b.t == J_ARR) s->block = xstrndup(b.p, b.n);
@@ -95,7 +100,10 @@ int state_save(const slim_state *s) {
     kv_s(&b, "ws", s->ws); kv_s(&b, "target", s->target); kv_s(&b, "profile", s->profile);
     kv_s(&b, "user", s->user); kv_s(&b, "udd", s->udd); kv_s(&b, "engine", s->engine); kv_s(&b, "log", s->log);
     if (s->vp_w > 0) sb_printf(&b, ",\"vp_w\":%d,\"vp_h\":%d,\"vp_scale\":%g,\"vp_mobile\":%d", s->vp_w, s->vp_h, s->vp_scale, s->vp_mobile);
-    kv_s(&b, "ua", s->ua);
+    if (s->vp_orient) sb_printf(&b, ",\"vp_orient\":%d", s->vp_orient);
+    if (s->vp_touch) sb_printf(&b, ",\"vp_touch\":%d", s->vp_touch);
+    if (s->gen) sb_printf(&b, ",\"gen\":%d", s->gen);
+    kv_s(&b, "ua", s->ua); kv_s(&b, "ua_preset", s->ua_preset); kv_s(&b, "dlg", s->dlg);
     if (s->offline) sb_puts(&b, ",\"offline\":1");
     if (s->block) { sb_puts(&b, ",\"block\":"); sb_puts(&b, s->block); }
     kv_s(&b, "dldir", s->dldir);

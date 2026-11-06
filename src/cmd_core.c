@@ -1,5 +1,6 @@
 /* Context, option parsing, output and connection helpers shared by commands. */
 #include "cmd.h"
+#include "hold.h"
 #include "interact.h"
 #include <dirent.h>
 #include <stdarg.h>
@@ -89,6 +90,46 @@ int ctx_state(ctx_t *c) {
     return 0;
 }
 
+int ctx_state_reload(ctx_t *c) {
+    if (c->port) return 0;
+    if (!c->have_st) return ctx_state(c);
+    slim_state f;
+    if (state_load(c->session, &f)) return -1;
+    state_free(&c->st);
+    c->st = f;
+    return 0;
+}
+
+/* runs every ~100 ms while a command waits for DevTools: accept beforeunload (and other dialogs
+ * by policy) without a keeper, and fail fast when a manual dialog blocks the page */
+static int ctx_hook(void *ud) {
+    ctx_t *c = ud;
+    if (c->bu_accept && c->sid) {
+        char *m; jv pr;
+        while (cdp_event(&c->cdp, c->sid, "Page.javascriptDialogOpening", 0, &m, &pr, NULL) == 1) {
+            char *type = json_get_str(pr, "type"), *msg = json_get_str(pr, "message");
+            const char *act = dlg_action(c->have_st ? c->st.dlg : NULL, type ? type : "alert");
+            int rc = 0;
+            if (!strcmp(act, "manual")) rc = slim_seterr("a JavaScript %s dialog \"%.120s\" is open (dialog policy: manual)", type ? type : "?", msg ? msg : "");
+            else cdp_send(&c->cdp, c->sid, "Page.handleJavaScriptDialog", !strcmp(act, "accept") ? "{\"accept\":true}" : "{\"accept\":false}", NULL);
+            free(type); free(msg); free(m);
+            if (rc) return -1;
+        }
+    }
+    if (c->hold_pid && c->tid && !c->allow_dialog) {
+        char d[320];
+        if (hold_pending(c->session, c->tid, d, sizeof d)) return slim_seterr("%s", d);
+    }
+    return 0;
+}
+
+static void st_save_ws(ctx_t *c, const char *url) {
+    slim_state f;
+    if (state_load(c->session, &f) == 0) { state_free(&c->st); c->st = f; }
+    state_set(&c->st.ws, url);
+    state_save(&c->st);
+}
+
 int ctx_browser(ctx_t *c) {
     if (c->connected && c->cdp.open) return 0;
     if (c->connected) ctx_disconnect(c);
@@ -105,9 +146,10 @@ int ctx_browser(ctx_t *c) {
         }
         if (cdp_connect(&c->cdp, url, ctimeout)) { free(url); return -1; }
         c->connected = 1;
-        if (c->have_st) { state_set(&c->st.ws, url); state_save(&c->st); }
+        if (c->have_st) st_save_ws(c, url);
         free(url);
     }
+    c->cdp.hook = ctx_hook; c->cdp.hook_ud = c;
     if (c->have_st && c->st.dldir) {
         sbuf p = {0};
         sb_puts(&p, "{\"behavior\":\"allow\",\"downloadPath\":"); sb_jstrz(&p, c->st.dldir); sb_putc(&p, '}');
@@ -134,6 +176,8 @@ void ctx_disconnect(ctx_t *c) {
 
 int ctx_set_target(ctx_t *c, const char *tid) {
     if (c->have_st && (!c->st.target || strcmp(c->st.target, tid))) {
+        slim_state f;   /* merge: another process may have changed emulation meanwhile */
+        if (state_load(c->session, &f) == 0) { state_free(&c->st); c->st = f; }
         state_set(&c->st.target, tid);
         return state_save(&c->st);
     }
@@ -174,37 +218,68 @@ int ctx_resolve_target(ctx_t *c, const char *prefix, char **tid) {
     return 0;
 }
 
+/* Apply the session emulation in this command's own DevTools session (no keeper, or stateless
+ * --port). Short bounded timeouts: never block a command for long. */
+int emu_apply_sync(ctx_t *c, int full) {
+    slim_state *s = &c->st;
+    int headless_fix = c->have_st && s->headless;
+    if (!full && s->vp_w <= 0 && !s->ua && !s->ua_preset && !s->offline && !s->block && !headless_fix) return 0;
+    int to = c->timeout < 3000 ? c->timeout : 3000;
+    char *base = NULL, *ver = NULL;
+    if (!s->ua && (s->ua_preset || headless_fix)) {
+        char *resp; jv res;
+        if (cdp_call(&c->cdp, NULL, "Browser.getVersion", NULL, to, &resp, &res) == 0) {
+            base = json_get_str(res, "userAgent");
+            char *pr = json_get_str(res, "product"), *sl = pr ? strchr(pr, '/') : NULL;
+            if (sl) ver = xstrdup(sl + 1);
+            free(pr); free(resp);
+        }
+    }
+    emu_step st[EMU_MAX];
+    int n = emu_plan(s, base, ver, full, 0, c->net_on, st);
+    free(base); free(ver);
+    long ids[EMU_MAX]; int k = 0, rc = 0;
+    for (int i = 0; i < n && !rc; i++) {
+        if (!strcmp(st[i].m, "Network.enable")) c->net_on = 1;
+        if (!strcmp(st[i].m, "Network.disable")) c->net_on = 0;
+        if (cdp_send(&c->cdp, c->sid, st[i].m, st[i].p, &ids[k++])) rc = -1;
+    }
+    emu_plan_free(st, n);
+    for (int i = 0; i < k && !rc; i++)
+        if (cdp_wait(&c->cdp, ids[i], c->sid, to, NULL, NULL)) rc = -1;
+    return rc ? slim_seterr("applying emulation: %s", slim_errmsg()) : 0;
+}
+
+int ctx_tap(ctx_t *c, double x, double y, int taps) {
+    if (!c->have_st || !emu_touch(&c->st)) return 1;
+    char p[160];
+    for (int i = 0; i < taps; i++) {
+        long a, b;
+        snprintf(p, sizeof p, "{\"type\":\"touchStart\",\"touchPoints\":[{\"x\":%.2f,\"y\":%.2f}]}", x, y);
+        if (cdp_send(&c->cdp, c->sid, "Input.dispatchTouchEvent", p, &a) ||
+            cdp_send(&c->cdp, c->sid, "Input.dispatchTouchEvent", "{\"type\":\"touchEnd\",\"touchPoints\":[]}", &b) ||
+            cdp_wait(&c->cdp, a, c->sid, c->timeout, NULL, NULL) || cdp_wait(&c->cdp, b, c->sid, c->timeout, NULL, NULL))
+            return slim_seterr("touch tap: %s", slim_errmsg());
+    }
+    return 0;
+}
+
 static int apply_emulation(ctx_t *c) {
     if (!c->have_st) return 0;
-    slim_state *s = &c->st;
-    sbuf p = {0};
-    long ids[4]; int n = 0;
-    if (s->vp_w > 0) {
-        sb_printf(&p, "{\"width\":%d,\"height\":%d,\"deviceScaleFactor\":%g,\"mobile\":%s}", s->vp_w, s->vp_h, s->vp_scale, s->vp_mobile ? "true" : "false");
-        if (cdp_send(&c->cdp, c->sid, "Emulation.setDeviceMetricsOverride", p.p, &ids[n++])) goto fail;
+    int r = hold_ready(c);
+    if (r <= 0) return r;
+    return emu_apply_sync(c, 0);
+}
+
+int emu_commit(ctx_t *c) {
+    if (c->have_st) {
+        c->st.gen++;
+        if (state_save(&c->st)) return -1;
+        int r = hold_ready(c);
+        if (r <= 0) return r;
     }
-    if (s->ua) {
-        sb_reset(&p); sb_puts(&p, "{\"userAgent\":"); sb_jstrz(&p, s->ua); sb_putc(&p, '}');
-        if (cdp_send(&c->cdp, c->sid, "Emulation.setUserAgentOverride", p.p, &ids[n++])) goto fail;
-    }
-    if (s->offline || s->block) {
-        if (ctx_enable(c, "Network")) goto fail;
-    }
-    if (s->offline) {
-        if (cdp_send(&c->cdp, c->sid, "Network.emulateNetworkConditions",
-                     "{\"offline\":true,\"latency\":0,\"downloadThroughput\":-1,\"uploadThroughput\":-1}", &ids[n++])) goto fail;
-    }
-    if (s->block) {
-        sb_reset(&p); sb_puts(&p, "{\"urls\":"); sb_puts(&p, s->block); sb_putc(&p, '}');
-        if (cdp_send(&c->cdp, c->sid, "Network.setBlockedURLs", p.p, &ids[n++])) goto fail;
-    }
-    for (int i = 0; i < n; i++)
-        if (cdp_wait(&c->cdp, ids[i], c->sid, c->timeout, NULL, NULL)) goto fail;
-    sb_free(&p);
-    return 0;
-fail:
-    sb_free(&p);
-    return slim_seterr("re-applying emulation: %s", slim_errmsg());
+    if (ctx_page(c)) return -1;
+    return emu_apply_sync(c, 1);
 }
 
 int ctx_page(ctx_t *c) {
@@ -233,7 +308,10 @@ int ctx_page(ctx_t *c) {
     }
     c->tid = want;
     if (!c->tab) ctx_set_target(c, want);
-    return apply_emulation(c);
+    if (apply_emulation(c)) return -1;
+    char d[320];
+    if (c->hold_pid && !c->allow_dialog && hold_pending(c->session, c->tid, d, sizeof d)) return slim_seterr("%s", d);
+    return 0;
 }
 
 int ctx_call(ctx_t *c, int page, const char *method, const char *params, char **resp, jv *res) {

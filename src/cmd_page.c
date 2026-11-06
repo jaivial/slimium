@@ -1,5 +1,6 @@
 /* Tabs, navigation, content extraction, screenshots, waits, lifecycle, contexts. */
 #include "cmd.h"
+#include "hold.h"
 #include "b64.h"
 #include <limits.h>
 #include <stdio.h>
@@ -56,6 +57,7 @@ static int poll_ready(ctx_t *c, int mode, long long dl) {
 
 static int navigate(ctx_t *c, const char *url, int mode) {
     if (ctx_enable(c, "Page")) return -1;
+    c->bu_accept = !c->hold_pid;   /* no keeper: accept beforeunload ourselves */
     cdp_flush(&c->cdp, c->sid, "Page.loadEventFired|Page.domContentEventFired");
     sbuf p = {0};
     sb_puts(&p, "{\"url\":"); sb_jstrz(&p, url); sb_putc(&p, '}');
@@ -152,12 +154,30 @@ int cmd_close(ctx_t *c, int argc, char **argv) {
     if (argc > 1) return usage_err(c, "close [ID]");
     char *tid = NULL;
     if (ctx_state(c)) return -1;
+    c->allow_dialog = 1;
     if (argc == 1) { if (ctx_resolve_target(c, argv[0], &tid)) return -1; }
     else { if (ctx_page(c)) return -1; tid = xstrdup(c->tid); }
+    /* without a keeper a beforeunload handler would keep the tab open behind a dialog: watch the
+     * closing tab from a session with Page enabled and accept it */
+    char *wsid = NULL, *osid = c->sid;
+    if (!c->hold_pid && (!c->have_st || hold_ready(c) == 1)) {
+        if (c->tid && !strcmp(c->tid, tid)) { if (ctx_enable(c, "Page") == 0) wsid = xstrdup(c->sid); }
+        else if (cdp_attach(&c->cdp, tid, c->timeout, &wsid) == 0 &&
+                 cdp_call(&c->cdp, wsid, "Page.enable", NULL, 3000, NULL, NULL)) { free(wsid); wsid = NULL; }
+    }
     sbuf p = {0};
     sb_puts(&p, "{\"targetId\":"); sb_jstrz(&p, tid); sb_putc(&p, '}');
     int r = ctx_call(c, 0, "Target.closeTarget", p.p, NULL, NULL);
     sb_free(&p);
+    if (!r && wsid) {
+        char *m;
+        c->sid = wsid; c->bu_accept = 1;
+        int got = cdp_event(&c->cdp, NULL, "Target.detachedFromTarget", 3000, &m, NULL, NULL);
+        if (got == 1) free(m);
+        c->sid = osid; c->bu_accept = 0;
+        if (got != 1) r = slim_seterr("tab %s did not close (beforeunload?)", tid);
+    }
+    free(wsid);
     if (r) { free(tid); return -1; }
     if (c->tid && !strcmp(c->tid, tid)) {
         free(c->sid); c->sid = NULL; free(c->tid); c->tid = NULL;
@@ -207,6 +227,7 @@ static int history(ctx_t *c, int argc, char **argv, int delta) {
     if (argc) return usage_err(c, "%s takes no arguments", delta < 0 ? "back" : "forward");
     int mode = wait_mode(c, w);
     if (mode < 0 || ctx_enable(c, "Page")) return -1;
+    c->bu_accept = !c->hold_pid;
     char *resp; jv res, e;
     if (cdp_call(&c->cdp, c->sid, "Page.getNavigationHistory", NULL, c->timeout, &resp, &res)) return -1;
     int cur = (int)json_get_num(res, "currentIndex", -1);
@@ -243,6 +264,7 @@ int cmd_reload(ctx_t *c, int argc, char **argv) {
     if (argc) return usage_err(c, "reload [--hard] [--wait load|dom|none]");
     int mode = wait_mode(c, w);
     if (mode < 0 || ctx_enable(c, "Page")) return -1;
+    c->bu_accept = !c->hold_pid;
     cdp_flush(&c->cdp, c->sid, "Page.loadEventFired|Page.domContentEventFired");
     long long t0 = now_ms();
     if (cdp_call(&c->cdp, c->sid, "Page.reload", hard ? "{\"ignoreCache\":true}" : NULL, c->timeout, NULL, NULL)) return -1;

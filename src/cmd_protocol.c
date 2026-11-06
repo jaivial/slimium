@@ -1,5 +1,6 @@
 /* Live DevTools schema discovery, event listening, and thin protocol wrappers. */
 #include "protocol.h"
+#include "hold.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -380,10 +381,37 @@ static int cmd_script(ctx_t *c, int argc, char **argv) {
                         off ? "page scripts disabled" : "page scripts enabled");
 }
 
+/* save a new dialog policy and wait for the keeper to take it (0, or 1 when there is none) */
+static int dialog_policy_set(ctx_t *c, const char *pol) {
+    state_set(&c->st.dlg, pol);
+    c->st.gen++;
+    if (state_save(&c->st)) return -1;
+    return hold_ready(c);
+}
+
+static int keeper_on(ctx_t *c) {
+    if (c->port || ctx_state(c) || !hold_enabled()) return 0;
+    return hold_ready(c) == 0;
+}
+
 static int cmd_dialog(ctx_t *c, int argc, char **argv) {
     const char *cs = opt_val(c, &argc, argv, "--count");
     int timeout = opt_ms(c, &argc, argv, "--timeout", c->timeout);
     if (opt_done(c, &argc, argv)) return -1;
+    if (argc >= 1 && !strcmp(argv[0], "policy")) {
+        if (argc > 2) return usage_err(c, "dialog policy [TYPE=accept|dismiss|manual,...|reset]  (TYPE: alert confirm prompt beforeunload all)");
+        if (c->port) return usage_err(c, "dialog policy needs a session (--session), not --port");
+        if (ctx_state_reload(c)) return -1;
+        char *np = NULL;
+        if (dlg_policy_merge(argc == 2 ? c->st.dlg : NULL, argc == 2 ? argv[1] : NULL, &np)) { c->usage = 1; return -1; }
+        if (argc == 2) { int r = dialog_policy_set(c, np); if (r < 0) { free(np); return -1; } }
+        static const char *const ty[] = {"beforeunload", "alert", "confirm", "prompt"};
+        for (int i = 0; i < 4; i++) out_s(c, ty[i], dlg_action(np, ty[i]));
+        out_s(c, "policy", np);
+        out_t(c, "dialog policy %s", np);
+        free(np);
+        return 0;
+    }
     if (argc == 2 && !strcmp(argv[0], "auto")) {
         int accept;
         if (!strcmp(argv[1], "accept")) accept = 1;
@@ -391,18 +419,38 @@ static int cmd_dialog(ctx_t *c, int argc, char **argv) {
         else return usage_err(c, "dialog auto accept|dismiss [--timeout MS] [--count N]");
         long count = 1;
         if (cs && (parse_int(cs, &count) || count < 0 || count > 1000000)) return usage_err(c, "bad --count '%s'", cs);
-        if (ctx_enable(c, "Page")) return -1;
         long n = 0; long long deadline = now_ms() + timeout;
-        while (!count || n < count) {
-            long long left = deadline - now_ms(); if (left <= 0) break;
-            char *msg;
-            int r = cdp_event(&c->cdp, c->sid, "Page.javascriptDialogOpening", (int)left, &msg, NULL, NULL);
+        if (keeper_on(c)) {   /* the keeper is the one session that sees dialogs: lend it the policy */
+            if (ctx_state_reload(c)) return -1;
+            char *old = c->st.dlg ? xstrdup(c->st.dlg) : NULL, *np = NULL;
+            dlg_policy_merge(NULL, accept ? "all=accept" : "all=dismiss", &np);
+            long sz; long base = dlg_log_count(c->session, &sz);
+            int r = dialog_policy_set(c, np);
+            free(np);
+            while (!r && (!count || n < count) && now_ms() < deadline) {
+                long cur = dlg_log_count(c->session, &sz);
+                if (cur < base) base = 0;   /* log was trimmed */
+                n = cur - base;
+                if (count && n >= count) break;
+                sleep_ms(20);
+            }
+            if (count && n > count) n = count;
+            if (ctx_state_reload(c) == 0) dialog_policy_set(c, old);
+            free(old);
             if (r < 0) return -1;
-            if (!r) break;
-            free(msg);
-            if (cdp_call(&c->cdp, c->sid, "Page.handleJavaScriptDialog",
-                         accept ? "{\"accept\":true}" : "{\"accept\":false}", c->timeout, NULL, NULL)) return -1;
-            n++;
+        } else {
+            if (ctx_enable(c, "Page")) return -1;
+            while (!count || n < count) {
+                long long left = deadline - now_ms(); if (left <= 0) break;
+                char *msg;
+                int r = cdp_event(&c->cdp, c->sid, "Page.javascriptDialogOpening", (int)left, &msg, NULL, NULL);
+                if (r < 0) return -1;
+                if (!r) break;
+                free(msg);
+                if (cdp_call(&c->cdp, c->sid, "Page.handleJavaScriptDialog",
+                             accept ? "{\"accept\":true}" : "{\"accept\":false}", c->timeout, NULL, NULL)) return -1;
+                n++;
+            }
         }
         out_i(c, "handled", n); out_b(c, "accept", accept);
         out_t(c, "handled %ld dialog%s (%s)", n, n == 1 ? "" : "s", accept ? "accept" : "dismiss");
@@ -410,9 +458,21 @@ static int cmd_dialog(ctx_t *c, int argc, char **argv) {
     }
     if (cs) return usage_err(c, "--count is only valid with dialog auto");
     if (argc < 1 || argc > 2 || (strcmp(argv[0], "accept") && strcmp(argv[0], "dismiss")))
-        return usage_err(c, "dialog accept [PROMPT_TEXT] | dismiss | auto accept|dismiss [--timeout MS]");
+        return usage_err(c, "dialog accept [PROMPT_TEXT] | dismiss | auto accept|dismiss [--timeout MS] | policy [SPEC]");
     int accept = !strcmp(argv[0], "accept");
     if (!accept && argc == 2) return usage_err(c, "dialog dismiss takes no prompt text");
+    if (keeper_on(c)) {   /* only the session that saw the dialog open can answer it */
+        char *tid = NULL;
+        if (c->tab && ctx_resolve_target(c, c->tab, &tid)) return -1;
+        if (!tid && c->st.target) tid = xstrdup(c->st.target);
+        int r = hold_request(c, "dialog", tid, accept, argc == 2 ? argv[1] : NULL);
+        if (r && tid && strstr(slim_errmsg(), "on this tab")) r = hold_request(c, "dialog", NULL, accept, argc == 2 ? argv[1] : NULL);
+        free(tid);
+        if (r) return -1;
+        out_s(c, "method", "Page.handleJavaScriptDialog"); out_b(c, "keeper", 1);
+        out_t(c, accept ? "dialog accepted" : "dialog dismissed");
+        return 0;
+    }
     sbuf p = {0}; sb_printf(&p, "{\"accept\":%s", accept ? "true" : "false");
     if (argc == 2) { sb_puts(&p, ",\"promptText\":"); sb_jstrz(&p, argv[1]); }
     sb_putc(&p, '}');
@@ -427,7 +487,7 @@ static const cmd_def PROTOCOL_COMMANDS[] = {
     {"geolocation", cmd_geolocation, 0, "set LAT LON [ACCURACY_M]|clear  geolocation override"},
     {"throttle", cmd_throttle, 0, "off|offline|slow-3g|fast-3g|slow-4g|fast-4g  network conditions"},
     {"cache", cmd_cache, 0, "on|off  HTTP cache for the current page"},
-    {"dialog", cmd_dialog, 0, "accept [TEXT]|dismiss|auto accept|dismiss [--timeout MS]  JavaScript dialogs"},
+    {"dialog", cmd_dialog, 0, "accept [TEXT]|dismiss|auto accept|dismiss [--timeout MS]|policy [TYPE=accept|dismiss|manual,...]  JavaScript dialogs"},
     {"script", cmd_script, 0, "on|off  page script execution"},
 };
 

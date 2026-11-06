@@ -1,11 +1,11 @@
 /* Cookies, storage, emulation (persisted per session), downloads, console. */
 #include "cmd.h"
+#include "hold.h"
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static void save_st(ctx_t *c) { if (c->have_st) state_save(&c->st); }
 
 int cmd_cookies(ctx_t *c, int argc, char **argv) {
     if (opt_done(c, &argc, argv)) return -1;
@@ -89,49 +89,58 @@ int cmd_storage_clear(ctx_t *c, int argc, char **argv) {
 
 int cmd_viewport(ctx_t *c, int argc, char **argv) {
     const char *sc = opt_val(c, &argc, argv, "--scale");
+    const char *ori = opt_val(c, &argc, argv, "--orientation");
     int mobile = opt_flag(&argc, argv, "--mobile");
+    int touch = opt_flag(&argc, argv, "--touch"), notouch = opt_flag(&argc, argv, "--no-touch");
     if (opt_done(c, &argc, argv)) return -1;
-    if (ctx_state(c)) return -1;
+    if (ctx_state_reload(c)) return -1;
+    slim_state *s = &c->st;
     if (argc == 1 && !strcmp(argv[0], "reset")) {
-        if (ctx_page(c) || cdp_call(&c->cdp, c->sid, "Emulation.clearDeviceMetricsOverride", NULL, c->timeout, NULL, NULL)) return -1;
-        c->st.vp_w = c->st.vp_h = 0; c->st.vp_scale = 0; c->st.vp_mobile = 0; save_st(c);
+        if (sc || ori || mobile || touch || notouch) return usage_err(c, "viewport reset takes no options");
+        s->vp_w = s->vp_h = 0; s->vp_scale = 0; s->vp_mobile = s->vp_orient = s->vp_touch = 0;
+        state_set(&s->ua_preset, NULL);
+        if (emu_commit(c)) return -1;
         out_t(c, "viewport reset");
         return 0;
     }
     long w = 0, h = 0; double scale = 0;
+    const char *preset = NULL;
     if (argc == 1 && (!strcmp(argv[0], "mobile") || !strcmp(argv[0], "tablet") || !strcmp(argv[0], "desktop"))) {
-        if (!strcmp(argv[0], "mobile")) { w = 375; h = 812; }
-        else if (!strcmp(argv[0], "tablet")) { w = 768; h = 1024; }
-        else { w = 1440; h = 900; }
-        /* Named presets are exact CSS-pixel sizes; --mobile remains opt-in. */
+        preset = argv[0];
+        if (!strcmp(preset, "mobile")) { w = 390; h = 844; scale = 3; mobile = 1; }
+        else if (!strcmp(preset, "tablet")) { w = 768; h = 1024; scale = 2; mobile = 1; }
+        else { w = 1440; h = 900; scale = 1; }
     } else if (argc != 2 || parse_int(argv[0], &w) || parse_int(argv[1], &h) || w < 1 || h < 1 || w > 10000000 || h > 10000000) {
-        return usage_err(c, "viewport W H [--scale F] [--mobile] | viewport mobile|tablet|desktop | viewport reset");
+        return usage_err(c, "viewport W H [--scale F] [--mobile] [--touch|--no-touch] [--orientation portrait|landscape|auto] | viewport mobile|tablet|desktop | viewport reset");
     }
     if (sc && (parse_double(sc, &scale) || scale <= 0 || scale > 10)) return usage_err(c, "bad --scale '%s'", sc);
-    if (ctx_page(c)) return -1;
-    char p[160];
-    snprintf(p, sizeof p, "{\"width\":%ld,\"height\":%ld,\"deviceScaleFactor\":%g,\"mobile\":%s}", w, h, scale, mobile ? "true" : "false");
-    if (cdp_call(&c->cdp, c->sid, "Emulation.setDeviceMetricsOverride", p, c->timeout, NULL, NULL)) return -1;
-    c->st.vp_w = (int)w; c->st.vp_h = (int)h; c->st.vp_scale = scale; c->st.vp_mobile = mobile; save_st(c);
+    if (touch && notouch) return usage_err(c, "use only one of --touch, --no-touch");
+    int o = 0;
+    if (ori && !strcmp(ori, "portrait")) o = 1;
+    else if (ori && !strcmp(ori, "landscape")) o = 2;
+    else if (ori && strcmp(ori, "auto")) return usage_err(c, "bad --orientation '%s' (portrait|landscape|auto)", ori);
+    s->vp_w = (int)w; s->vp_h = (int)h; s->vp_scale = scale; s->vp_mobile = mobile; s->vp_orient = o;
+    s->vp_touch = touch ? 1 : notouch ? 2 : 0;
+    state_set(&s->ua_preset, preset && strcmp(preset, "desktop") ? preset : NULL);
+    if (emu_commit(c)) return -1;
+    int t = emu_touch(s), por = emu_portrait(s);
     out_i(c, "width", w); out_i(c, "height", h); out_d(c, "scale", scale); out_b(c, "mobile", mobile);
-    out_t(c, "viewport %ldx%ld%s", w, h, mobile ? " mobile" : "");
+    out_b(c, "touch", t); out_s(c, "orientation", por ? "portrait" : "landscape");
+    if (preset) out_s(c, "preset", preset);
+    out_b(c, "keeper", c->hold_pid > 0);
+    out_t(c, "viewport %ldx%ld%s%s %s", w, h, mobile ? " mobile" : "", t ? " touch" : "", por ? "portrait" : "landscape");
+    if (scale > 0) out_t(c, " dpr %g", scale);
     return 0;
 }
 
 int cmd_ua(ctx_t *c, int argc, char **argv) {
     int reset = opt_flag(&argc, argv, "--reset");
     if (opt_done(c, &argc, argv)) return -1;
-    if (ctx_state(c)) return -1;
     if (reset ? argc != 0 : argc != 1) return usage_err(c, "ua STRING | ua --reset");
-    if (ctx_page(c)) return -1;
-    const char *ua = reset ? "" : argv[0];
-    sbuf p = {0};
-    sb_puts(&p, "{\"userAgent\":"); sb_jstrz(&p, ua); sb_putc(&p, '}');
-    int r = cdp_call(&c->cdp, c->sid, "Emulation.setUserAgentOverride", p.p, c->timeout, NULL, NULL);
-    sb_free(&p);
-    if (r) return -1;
-    if (c->have_st) { state_set(&c->st.ua, reset ? NULL : ua); save_st(c); }
-    out_s(c, "ua", reset ? NULL : ua);
+    if (ctx_state_reload(c)) return -1;
+    state_set(&c->st.ua, reset ? NULL : argv[0]);
+    if (emu_commit(c)) return -1;
+    out_s(c, "ua", reset ? NULL : argv[0]);
     out_t(c, reset ? "user agent reset" : "user agent set");
     return 0;
 }
@@ -140,11 +149,9 @@ int cmd_offline(ctx_t *c, int argc, char **argv) {
     if (opt_done(c, &argc, argv)) return -1;
     if (argc != 1 || (strcmp(argv[0], "on") && strcmp(argv[0], "off"))) return usage_err(c, "offline on|off");
     int on = !strcmp(argv[0], "on");
-    if (ctx_state(c) || ctx_enable(c, "Network")) return -1;
-    char p[128];
-    snprintf(p, sizeof p, "{\"offline\":%s,\"latency\":0,\"downloadThroughput\":-1,\"uploadThroughput\":-1}", on ? "true" : "false");
-    if (cdp_call(&c->cdp, c->sid, "Network.emulateNetworkConditions", p, c->timeout, NULL, NULL)) return -1;
-    if (c->have_st) { c->st.offline = on; save_st(c); }
+    if (ctx_state_reload(c)) return -1;
+    c->st.offline = on;
+    if (emu_commit(c)) return -1;
     out_b(c, "offline", on);
     out_t(c, "offline %s", argv[0]);
     return 0;
@@ -152,17 +159,13 @@ int cmd_offline(ctx_t *c, int argc, char **argv) {
 
 int cmd_block(ctx_t *c, int argc, char **argv) {
     if (opt_done(c, &argc, argv)) return -1;
-    if (ctx_state(c) || ctx_enable(c, "Network")) return -1;
+    if (ctx_state_reload(c)) return -1;
     sbuf a = {0};
     sb_putc(&a, '[');
     for (int i = 0; i < argc; i++) { if (i) sb_putc(&a, ','); sb_jstrz(&a, argv[i]); }
     sb_putc(&a, ']');
-    sbuf p = {0};
-    sb_puts(&p, "{\"urls\":"); sb_puts(&p, a.p); sb_putc(&p, '}');
-    int r = cdp_call(&c->cdp, c->sid, "Network.setBlockedURLs", p.p, c->timeout, NULL, NULL);
-    sb_free(&p);
-    if (r) { sb_free(&a); return -1; }
-    if (c->have_st) { state_set(&c->st.block, argc ? a.p : NULL); save_st(c); }
+    state_set(&c->st.block, argc ? a.p : NULL);
+    if (emu_commit(c)) { sb_free(&a); return -1; }
     out_raw(c, "blocked", a.p, a.n);
     if (argc) out_t(c, "blocking %d pattern%s", argc, argc > 1 ? "s" : ""); else out_t(c, "unblocked");
     sb_free(&a);
@@ -185,7 +188,7 @@ int cmd_download_dir(ctx_t *c, int argc, char **argv) {
     int r = ctx_call(c, 0, "Browser.setDownloadBehavior", p.p, NULL, NULL);
     sb_free(&p);
     if (r) return -1;
-    if (c->have_st) { state_set(&c->st.dldir, off ? NULL : rp); save_st(c); }
+    if (c->have_st) { state_set(&c->st.dldir, off ? NULL : rp); state_save(&c->st); }
     out_s(c, "dir", off ? NULL : rp);
     out_t(c, off ? "downloads: default behavior" : "downloads go to %s", rp);
     return 0;

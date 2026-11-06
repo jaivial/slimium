@@ -6,10 +6,16 @@ typedef struct {
     char *name;
     int pid, port, attached, headless;
     char *ws, *target, *profile, *user, *udd, *engine, *log;
-    /* emulation re-applied on every attach (CDP resets overrides on disconnect) */
+    /* emulation: owned by the session's keeper ('__hold', see docs/EMULATION.md), re-applied per
+     * command only without one. gen is bumped by every emulation/dialog-policy change. */
+    int gen;
     int vp_w, vp_h, vp_mobile;
+    int vp_orient;    /* 0 auto (portrait iff H >= W), 1 portrait, 2 landscape */
+    int vp_touch;     /* 0 auto (= mobile), 1 on, 2 off */
     double vp_scale;
-    char *ua;
+    char *ua;         /* explicit user agent (wins) */
+    char *ua_preset;  /* "mobile"|"tablet": Android UA derived from the engine when ua is NULL */
+    char *dlg;        /* dialog policy "beforeunload=accept,alert=accept,confirm=dismiss,prompt=dismiss" */
     int offline;
     char *block;  /* JSON array text of URL patterns, NULL = none */
     char *dldir;

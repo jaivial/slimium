@@ -12,14 +12,12 @@ static int cmd_resize_alias(ctx_t *c, int argc, char **argv) {
     return cmd_viewport(c, argc, argv);
 }
 
-static int live_viewport(ctx_t *c, int w, int h, int mobile, double scale) {
-    char p[192];
-    if (w > 0) {
-        snprintf(p, sizeof p, "{\"width\":%d,\"height\":%d,\"deviceScaleFactor\":%g,\"mobile\":%s}",
-                 w, h, scale, mobile ? "true" : "false");
-        return cdp_call(&c->cdp, c->sid, "Emulation.setDeviceMetricsOverride", p, c->timeout, NULL, NULL);
-    }
-    return cdp_call(&c->cdp, c->sid, "Emulation.clearDeviceMetricsOverride", NULL, c->timeout, NULL, NULL);
+/* through the session state, so the keeper (owner of the overrides) applies each size */
+static int live_viewport(ctx_t *c, int w, int h, int mobile, double scale, int orient, int touch) {
+    if (ctx_state_reload(c)) return -1;
+    c->st.vp_w = w; c->st.vp_h = h; c->st.vp_mobile = mobile; c->st.vp_scale = scale;
+    c->st.vp_orient = orient; c->st.vp_touch = touch;
+    return emu_commit(c);
 }
 
 static int save_png(ctx_t *c, const char *path) {
@@ -64,11 +62,12 @@ static int cmd_responsive(ctx_t *c, int argc, char **argv) {
     if (mkdir_p(argv[0], 0755)) return -1;
     int old_w = c->have_st ? c->st.vp_w : 0, old_h = c->have_st ? c->st.vp_h : 0;
     int old_mobile = c->have_st ? c->st.vp_mobile : 0;
+    int old_orient = c->have_st ? c->st.vp_orient : 0, old_touch = c->have_st ? c->st.vp_touch : 0;
     double old_scale = c->have_st ? c->st.vp_scale : 0;
     int rc = -1, made = 0;
     sbuf json = {0}; sb_putc(&json, '[');
     for (int i = 0; i < count; i++) {
-        if (live_viewport(c, widths[i], heights[i], 0, 0)) goto done;
+        if (live_viewport(c, widths[i], heights[i], 0, 0, 0, 0)) goto done;
         char *resp = NULL; jv obj, value;
         const char *expr = "new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve([innerWidth,innerHeight]))))";
         if (ctx_eval(c, expr, &resp, &obj)) goto done;
@@ -94,7 +93,7 @@ static int cmd_responsive(ctx_t *c, int argc, char **argv) {
     sb_putc(&json, ']');
     rc = 0;
 done:
-    if (live_viewport(c, old_w, old_h, old_mobile, old_scale)) rc = -1;
+    if (live_viewport(c, old_w, old_h, old_mobile, old_scale, old_orient, old_touch)) rc = -1;
     if (!rc) {
         out_raw(c, "captures", json.p, json.n); out_i(c, "count", made);
         out_i(c, "restored_width", old_w); out_i(c, "restored_height", old_h);
@@ -106,7 +105,7 @@ done:
 static const cmd_def media_commands[] = {
     {"record", record_command, 0, "start FILE [--fps N] [--format mp4|webm|avi] [--max-seconds N] [--quality N] | stop [--id ID] | status | list"},
     {"responsive", cmd_responsive, 0, "OUTDIR --sizes WxH,...  capture live page at each viewport, then restore"},
-    {"resize", cmd_resize_alias, 0, "W H [--scale F] [--mobile] | reset  alias for viewport"},
+    {"resize", cmd_resize_alias, 0, "W H [--scale F] [--mobile] [--touch|--no-touch] [--orientation O] | mobile|tablet|desktop | reset  alias for viewport"},
     {"__record-worker", record_worker_command, CF_NOBATCH, "internal detached recording worker"},
 };
 

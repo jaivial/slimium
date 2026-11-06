@@ -8,6 +8,7 @@ extern const cmd_def *slim_interact_commands(size_t *) __attribute__((weak));
 extern const cmd_def *slim_media_commands(size_t *) __attribute__((weak));
 extern const cmd_def *slim_protocol_commands(size_t *) __attribute__((weak));
 extern const cmd_def *slim_mcp_commands(size_t *) __attribute__((weak));
+extern const cmd_def *slim_hold_commands(size_t *) __attribute__((weak));
 
 static const module_fn modules[] = {
     slim_user_profile_commands,
@@ -15,6 +16,7 @@ static const module_fn modules[] = {
     slim_media_commands,
     slim_protocol_commands,
     slim_mcp_commands,
+    slim_hold_commands,
 };
 
 const cmd_def *slim_find_module(const char *name) {

@@ -1,5 +1,6 @@
 /* Memory reporting/purging and raw DevTools passthrough. */
 #include "cmd.h"
+#include "hold.h"
 #include "gov.h"
 #include "mem.h"
 #include "protocol.h"
@@ -159,6 +160,15 @@ int cmd_cdp(ctx_t *c, int argc, char **argv) {
     out_raw(c, "result", res.p, res.n);
     sb_add(&c->ot, res.p, res.n);
     free(resp);
+    /* a raw override from this short-lived session is dropped when it detaches, and that resets
+     * the keeper's metrics too: detach now and let the keeper re-assert the session emulation */
+    if (ev_ms <= 0 && !strncmp(argv[0], "Emulation.", 10) && c->hold_pid &&
+        (strstr(argv[0], "DeviceMetrics") || strstr(argv[0], "Touch") || strstr(argv[0], "UserAgent"))) {
+        slim_cdp_unselect(c, owned_sid); owned_sid = NULL;
+        ctx_reset_page(c);
+        hold_request(c, "reassert", NULL, 0, NULL);
+        out_b(c, "keeper_reasserted", 1);
+    }
     if (ev_ms > 0) {
         long long dl = now_ms() + ev_ms;
         int n = 0;

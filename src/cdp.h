@@ -12,6 +12,11 @@ typedef struct {
     long next_id;
     cdp_ev *head, *tail;
     size_t nev, evbytes;
+    /* optional: called about every 100 ms while cdp_wait/cdp_event block; non-zero aborts the
+     * wait with the hook's error (used to fail fast on JavaScript dialogs) */
+    int (*hook)(void *ud);
+    void *hook_ud;
+    long long hook_next;
 } cdp_t;
 
 /* GET http://127.0.0.1:port/json/version -> webSocketDebuggerUrl (malloc'd). */
@@ -28,6 +33,8 @@ int cdp_call(cdp_t *c, const char *sid, const char *method, const char *params, 
 /* Wait for an event. methods: "A" or "A|B|C"; sid NULL matches browser-level events only,
  * sid "*" matches any. 1 got (*msg malloc'd, *params view, *method_out view), 0 timeout, -1 error. */
 int cdp_event(cdp_t *c, const char *sid, const char *methods, int timeout_ms, char **msg, jv *params, jv *method_out);
+/* Next raw message (queued first): 1 got (*msg malloc'd), 0 timeout, -1 error. */
+int cdp_next(cdp_t *c, int timeout_ms, char **msg, size_t *len);
 /* Drop buffered events matching (methods NULL = all for that sid). */
 void cdp_flush(cdp_t *c, const char *sid, const char *methods);
 
