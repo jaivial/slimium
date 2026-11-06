@@ -241,3 +241,72 @@ Measured with `tests/cu/variants.sh` (full suite + one RAM run per variant;
 - `tests/cu/run.sh` feature suite, `tests/cu/ram.sh` RAM comparison, `tests/cu/variants.sh` flag matrix
 - `tests/cu/fixtures/` pages (form, login/account, links/page2, iframe/frame, shadow, long, download, late, upload)
 - `tests/cu/results/` measured output
+
+## MCP: direct slimium versus native cu MCP
+
+Two different MCP servers are available; they do not replace one another:
+
+| | `slimium mcp` | `cu-slim mcp` |
+|---|---|---|
+| implementation | slimium's C11 in-process `cli_invoke` dispatcher | cu's own Rust `src/mcp.rs`, translating calls to its daemon's HTTP routes |
+| browser/session | one selected slimium session and one reused CDP connection | one cu daemon; each MCP process gets its own leased page/session |
+| best for | browser lifecycle, CLI-compatible commands, raw CDP, eval, screenshots to files, minimal adapter overhead | compact ref-addressable snapshots/actions, contexts, vault/session save, uploads/downloads, console, QA marks, human handoff |
+| tab lifetime | slimium's current tab persists across MCP connections; browser stays up at MCP EOF | tabs opened by the MCP session are closed at clean disconnect; the daemon is the backstop after a kill |
+| logging | no argument/result logging; optional `SLIM_MCP_LOG` | cu logs no tool arguments; its protocol log goes to stderr |
+
+**cu does not internally use slimium's MCP server.** `cu-slim mcp` is cu 1.9.0's native MCP
+implementation. Its browser is slimium because the `cu-slim` launcher sets
+`CU_BROWSER=~/.local/bin/slimium-chrome` (resolving to `~/.local/bin/slimium`), not because cu
+loads or invokes `slimium mcp`. Use direct slimium MCP when low-level CLI/CDP access is wanted;
+use cu MCP when cu's higher-level refs and daemon services are wanted. They can coexist, but
+should not drive the same tab concurrently unless that coordination is intentional.
+
+Exact isolated client configuration (only HTTP 8790 / CDP 9390 and
+`~/.local/share/cu-slim` are used by `cu-slim`):
+
+```json
+{
+  "mcpServers": {
+    "slimium": {
+      "command": "/home/jaime/.local/bin/slimium",
+      "args": ["--session", "default", "mcp"]
+    },
+    "cu-slim": {
+      "command": "/home/jaime/.local/bin/cu-slim",
+      "args": ["mcp"],
+      "env": {
+        "CU_SLIM_HOME": "/home/jaime/.local/share/cu-slim",
+        "CU_SLIM_PORT": "8790",
+        "CU_SLIM_CDP_PORT": "9390"
+      }
+    }
+  }
+}
+```
+
+The equivalent client CLI registrations are:
+
+```sh
+claude mcp add slimium -- slimium --session default mcp
+claude mcp add cu-slim -- cu-slim mcp
+codex mcp add slimium -- slimium --session default mcp
+codex mcp add cu-slim -- cu-slim mcp
+```
+
+See [MCP.md](MCP.md) for direct slimium schemas, framing, safety and benchmarks.
+
+### Native cu MCP verification
+
+```sh
+tests/cu/mcp-integration.sh
+```
+
+This test uses the already deployed `~/.local/bin/cu-slim` and does not rebuild or install
+anything. It verifies that diagnostics resolve the browser to the real `slimium` binary on
+8790/9390, then runs two native cu MCP clients: initialize/list/status, two distinct data-URL
+pages, same-connection `text`/`snapshot`/`tabs`, and clean shutdown. Current result: **30 checks,
+0 failures**, in both already-running and cold-start modes. If 8790 is closed, the script starts
+the isolated daemon itself and records its PID; its trap stops only that PID. An already-running
+isolated daemon is left running. It never accesses the user's real cu, its ports, data, or
+processes. No `make install` was needed for this verification; the orchestrator owns final
+installation of the merged slimium binary.
