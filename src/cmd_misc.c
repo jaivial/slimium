@@ -2,6 +2,7 @@
 #include "cmd.h"
 #include "gov.h"
 #include "mem.h"
+#include "protocol.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -115,29 +116,46 @@ int cmd_purge(ctx_t *c, int argc, char **argv) {
     return 0;
 }
 
-static int browser_domain(const char *m) {
-    static const char *const d[] = {"Target.", "Browser.", "SystemInfo.", "Tethering.", "Tracing.", NULL};
-    for (int i = 0; d[i]; i++) if (!strncmp(m, d[i], strlen(d[i]))) return 1;
+static int cdp_params(ctx_t *c, const char *arg, char **owned) {
+    *owned = NULL;
+    if (!arg) return 0;
+    const char *params = arg;
+    if (!strcmp(arg, "-")) {
+        if (read_fd_all(0, owned, NULL, (size_t)1 << 30)) return -1;
+        params = *owned;
+    } else if (arg[0] == '@') {
+        if (!arg[1]) return usage_err(c, "@ requires a parameter file path");
+        if (read_file(arg + 1, owned, NULL, (size_t)1 << 30)) return -1;
+        params = *owned;
+    }
+    jv d;
+    if (json_parse(params, strlen(params), &d) || d.t != J_OBJ) {
+        free(*owned); *owned = NULL;
+        return usage_err(c, "PARAMS must be a JSON object (inline, @file, or - for stdin)");
+    }
     return 0;
 }
 
 int cmd_cdp(ctx_t *c, int argc, char **argv) {
     const char *tgt = opt_val(c, &argc, argv, "--target");
+    const char *target_id = opt_val(c, &argc, argv, "--target-id");
+    const char *session_id = opt_val(c, &argc, argv, "--cdp-session");
     int ev_ms = opt_ms(c, &argc, argv, "--events", 0);
     if (opt_done(c, &argc, argv)) return -1;
-    if (argc < 1 || argc > 2 || !strchr(argv[0], '.')) return usage_err(c, "cdp Domain.method [PARAMS_JSON] [--target browser|page] [--events MS]");
-    int page;
-    if (!tgt) page = !browser_domain(argv[0]);
-    else if (!strcmp(tgt, "browser")) page = 0;
-    else if (!strcmp(tgt, "page")) page = 1;
-    else return usage_err(c, "bad --target '%s' (browser|page)", tgt);
-    const char *params = argc == 2 ? argv[1] : NULL;
-    if (params) {
-        jv d;
-        if (json_parse(params, strlen(params), &d) || d.t != J_OBJ) return usage_err(c, "PARAMS must be a JSON object");
+    if (argc < 1 || argc > 2 || !strchr(argv[0], '.'))
+        return usage_err(c, "cdp Domain.method [PARAMS_JSON|@file|-] [--target browser|page] [--target-id ID|--cdp-session ID] [--events MS]");
+    char *owned_params = NULL;
+    if (cdp_params(c, argc == 2 ? argv[1] : NULL, &owned_params)) return -1;
+    const char *params = owned_params ? owned_params : argc == 2 ? argv[1] : NULL;
+    const char *sid; char *owned_sid = NULL;
+    if (slim_cdp_select(c, tgt, target_id, session_id,
+                        !slim_cdp_browser_domain(argv[0]), &sid, &owned_sid)) {
+        free(owned_params); return -1;
     }
     char *resp; jv res;
-    if (ctx_call(c, page, argv[0], params, &resp, &res)) return -1;
+    if (cdp_call(&c->cdp, sid, argv[0], params, c->timeout, &resp, &res)) {
+        slim_cdp_unselect(c, owned_sid); free(owned_params); return -1;
+    }
     out_raw(c, "result", res.p, res.n);
     sb_add(&c->ot, res.p, res.n);
     free(resp);
@@ -160,5 +178,7 @@ int cmd_cdp(ctx_t *c, int argc, char **argv) {
         }
         sb_putc(&c->oj, ']');
     }
+    slim_cdp_unselect(c, owned_sid);
+    free(owned_params);
     return 0;
 }
