@@ -43,7 +43,7 @@ int state_path(const char *session, const char *ext, char *buf, unsigned n) {
 void state_set(char **f, const char *v) { free(*f); *f = v ? xstrdup(v) : NULL; }
 
 void state_free(slim_state *s) {
-    free(s->name); free(s->ws); free(s->target); free(s->profile); free(s->udd);
+    free(s->name); free(s->ws); free(s->target); free(s->profile); free(s->user); free(s->udd);
     free(s->engine); free(s->log); free(s->ua); free(s->block); free(s->dldir);
     memset(s, 0, sizeof *s);
 }
@@ -65,6 +65,7 @@ int state_load(const char *session, slim_state *s) {
     s->ws = json_get_str(d, "ws");
     s->target = json_get_str(d, "target");
     s->profile = json_get_str(d, "profile");
+    s->user = json_get_str(d, "user");
     s->udd = json_get_str(d, "udd");
     s->engine = json_get_str(d, "engine");
     s->log = json_get_str(d, "log");
@@ -92,7 +93,7 @@ int state_save(const slim_state *s) {
     sbuf b = {0};
     sb_printf(&b, "{\"pid\":%d,\"port\":%d,\"attached\":%d,\"headless\":%d", s->pid, s->port, s->attached, s->headless);
     kv_s(&b, "ws", s->ws); kv_s(&b, "target", s->target); kv_s(&b, "profile", s->profile);
-    kv_s(&b, "udd", s->udd); kv_s(&b, "engine", s->engine); kv_s(&b, "log", s->log);
+    kv_s(&b, "user", s->user); kv_s(&b, "udd", s->udd); kv_s(&b, "engine", s->engine); kv_s(&b, "log", s->log);
     if (s->vp_w > 0) sb_printf(&b, ",\"vp_w\":%d,\"vp_h\":%d,\"vp_scale\":%g,\"vp_mobile\":%d", s->vp_w, s->vp_h, s->vp_scale, s->vp_mobile);
     kv_s(&b, "ua", s->ua);
     if (s->offline) sb_puts(&b, ",\"offline\":1");

@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Profile scroll fixture</title>
+<style>body{margin:0;height:3200px}#bottom{position:absolute;top:2800px}</style>
+<h1>Profile scroll fixture</h1>
+<pre id="state">pending</pre>
+<div id="bottom">bottom</div>
+<script>
+function readProfileState() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('slimium-profile-test', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('kv');
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      const get = db.transaction('kv', 'readonly').objectStore('kv').get('login-marker');
+      get.onerror = () => reject(get.error);
+      get.onsuccess = () => resolve({
+        cookie: (document.cookie.match(/(?:^|; )slim_test_cookie=([^;]*)/) || [])[1] || null,
+        local: localStorage.getItem('slim_test_local'),
+        idb: get.result || null
+      });
+    };
+  });
+}
+
+window.profileState = readProfileState();
+window.profileState.then(value => {
+  document.querySelector('#state').textContent = JSON.stringify(value);
+});
+</script>

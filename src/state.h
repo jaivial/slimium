@@ -5,7 +5,7 @@
 typedef struct {
     char *name;
     int pid, port, attached, headless;
-    char *ws, *target, *profile, *udd, *engine, *log;
+    char *ws, *target, *profile, *user, *udd, *engine, *log;
     /* emulation re-applied on every attach (CDP resets overrides on disconnect) */
     int vp_w, vp_h, vp_mobile;
     double vp_scale;
