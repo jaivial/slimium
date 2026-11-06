@@ -409,7 +409,12 @@ int userprof_data_dir(const char *name, char *buf, size_t cap) {
     if (root_path(root, sizeof root, 1) || path3(dir, sizeof dir, root, name, NULL) || path3(data, sizeof data, root, name, "data")) return -1;
     struct stat st;
     if (lstat(dir, &st) || !S_ISDIR(st.st_mode)) return slim_seterr("invalid directory for user profile '%s'", name);
-    if (chmod(dir, 0700) || mkdir_p(data, 0700) || chmod(data, 0700)) return slim_seterr("prepare user profile data: %s", strerror(errno));
+    if (lstat(data, &st) == 0) {
+        if (!S_ISDIR(st.st_mode)) return slim_seterr("user profile data is not a real directory: %s", data);
+    } else if (errno != ENOENT) return slim_seterr("inspect user profile data: %s", strerror(errno));
+    else if (mkdir(data, 0700) && errno != EEXIST) return slim_seterr("create user profile data: %s", strerror(errno));
+    if (chmod(dir, 0700) || chmod(data, 0700)) return slim_seterr("prepare user profile data: %s", strerror(errno));
+    if (lstat(data, &st) || !S_ISDIR(st.st_mode)) return slim_seterr("user profile data is not a real directory: %s", data);
     char resolved[PATH_MAX];
     if (!realpath(data, resolved)) return slim_seterr("resolve user profile data: %s", strerror(errno));
     int n = snprintf(buf, cap, "%s", resolved);
@@ -419,7 +424,10 @@ int userprof_data_dir(const char *name, char *buf, size_t cap) {
 
 int userprof_save_pages(const char *name, const char *pages_json, int current_index, const char *current_url) {
     jv pages;
-    if (!pages_json || json_parse(pages_json, strlen(pages_json), &pages) || pages.t != J_ARR || json_len(pages) > 256)
+    size_t pages_len = pages_json ? strlen(pages_json) : 0, url_len = current_url ? strlen(current_url) : 0;
+    if (pages_len > META_MAX - 4096 || url_len > META_MAX - 4096 - pages_len)
+        return slim_seterr("tab snapshot is too large");
+    if (!pages_json || json_parse(pages_json, pages_len, &pages) || pages.t != J_ARR || json_len(pages) > 256)
         return slim_seterr("invalid tab snapshot");
     char root[PATH_MAX];
     if (root_path(root, sizeof root, 1)) return -1;

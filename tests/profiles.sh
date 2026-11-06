@@ -172,7 +172,13 @@ t_re status-default-user '"user":"alpha"' "$BIN" --session "$A" --json status
 t_re default-ua '^ProfileTests/1.0$' "$BIN" --session "$A" eval 'navigator.userAgent'
 t_re default-locale '^en-US$' "$BIN" --session "$A" eval 'navigator.language'
 t_ok fixture-write "$BIN" --session "$A" nav "$url_set"
-t_re fixture-ready '^true$' "$BIN" --session "$A" eval 'window.profileFixtureReady'
+FIXTURE_READY=0
+for i in $(seq 1 50); do
+    run_capture "$BIN" --session "$A" eval 'window.profileFixtureReady'
+    if [ "$RC" = 0 ] && [ "$LAST" = true ]; then FIXTURE_READY=1; break; fi
+    sleep 0.1
+done
+ok fixture-ready "$LAST" '[ "$FIXTURE_READY" = 1 ]'
 sleep 1
 must stop_session "$A"
 pass=$((pass + 1))
@@ -199,7 +205,9 @@ pass=$((pass + 1))
 T0=$(now_ms)
 run_capture "$BIN" --session "$A" profile restore
 M_RESTORE=$(( $(now_ms) - T0 ))
-if [ "$RC" = 0 ]; then pass=$((pass + 1)); else echo "FAIL [restore] $(head -c 400 "$OUT/err") $LAST"; fail=$((fail + 1)); fi
+if [ "$RC" = 0 ] && printf '%s' "$LAST" | grep -Eq '^restored 2 pages for user profile alpha \(current [01]\)$'; then
+    pass=$((pass + 1));
+else echo "FAIL [restore] $(head -c 400 "$OUT/err") $LAST"; fail=$((fail + 1)); fi
 run_capture "$BIN" --session "$A" --json tabs
 TAB_COUNT=$(printf '%s' "$LAST" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["tabs"]))')
 ok restore-two-tabs "$TAB_COUNT" '[ "$TAB_COUNT" = 2 ]'
@@ -289,6 +297,7 @@ t_fail deleted-beta-gone 'no user profile' "$BIN" profile show beta
 t_ok create-symlink-case "$BIN" profile create linkcase
 rmdir "$ROOT/linkcase/data"
 ln -s "$VICTIM" "$ROOT/linkcase/data"
+t_fail symlink-data-start 'not a real directory' "$BIN" --session "$DUP" start --user linkcase --port "$P2" --no-gov
 t_ok delete-symlink-case "$BIN" profile delete linkcase --yes
 ok symlink-victim-survives "$([ -f "$VICTIM/keep" ])" '[ -f "$VICTIM/keep" ]'
 t_fail relative-root 'must be an absolute path' env SLIM_PROFILES_ROOT=relative "$BIN" profile list
