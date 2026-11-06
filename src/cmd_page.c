@@ -402,6 +402,35 @@ int cmd_shot(ctx_t *c, int argc, char **argv) {
         sb_printf(&p, ",\"clip\":{\"x\":0,\"y\":0,\"width\":%.0f,\"height\":%.0f,\"scale\":1},\"captureBeyondViewport\":true", w, h);
     }
     sb_putc(&p, '}');
+    if (c->hold_pid) {
+        /* the keeper's session carries the device metrics: only its capture has the emulated DPR
+         * (a capture with clip/scale from this session would also reset them) */
+        char tmp[PATH_MAX], rp[PATH_MAX];
+        const char *dst = file;
+        if (!strcmp(file, "-")) {
+            char e[48]; snprintf(e, sizeof e, ".shot%d", (int)getpid());
+            if (state_path(c->session, e, tmp, sizeof tmp)) { sb_free(&p); return -1; }
+            dst = tmp;
+        } else if (file[0] != '/') {
+            if (!getcwd(rp, sizeof rp - 2) || strlen(rp) + strlen(file) + 2 >= sizeof rp) { sb_free(&p); return slim_seterr("path too long"); }
+            strcat(rp, "/"); strcat(rp, file); dst = rp;
+        }
+        sbuf x = {0};
+        sb_puts(&x, "\"params\":"); sb_puts(&x, p.p); sb_puts(&x, ",\"path\":"); sb_jstrz(&x, dst);
+        int r = hold_request(c, "shot", c->tid, 0, NULL, x.p, c->timeout);
+        sb_free(&x); sb_free(&p);
+        if (r) return -1;
+        char *d = NULL; size_t n = 0;
+        if (read_file(dst, &d, &n, (size_t)1 << 30)) return -1;
+        if (dst == tmp) {
+            unlink(tmp);
+            if (fwrite(d, 1, n, stdout) != n) { free(d); return slim_seterr("write stdout failed"); }
+        }
+        free(d);
+        out_s(c, "file", file); out_i(c, "bytes", (long long)n); out_s(c, "format", fmt);
+        if (strcmp(file, "-")) out_t(c, "%s\t%ld bytes", file, (long)n);
+        return 0;
+    }
     char *resp; jv res;
     int r = cdp_call(&c->cdp, c->sid, "Page.captureScreenshot", p.p, c->timeout, &resp, &res);
     sb_free(&p);

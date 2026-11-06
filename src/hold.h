@@ -21,8 +21,10 @@ int hold_owner(const char *session, int *gen);   /* validated keeper pid (0 none
 int hold_spawn(const char *session, int wait_ms);/* make sure a keeper runs: pid or 0 */
 /* 0: the keeper applied c->st.gen; 1: no keeper (apply in this session); -1 error */
 int hold_ready(ctx_t *c);
-/* op "reassert" (re-apply everything) or "dialog" (accept/dismiss the pending dialog of target). */
-int hold_request(ctx_t *c, const char *op, const char *target, int accept, const char *text);
+/* op "reassert" (re-apply everything), "dialog" (accept/dismiss the pending dialog of target) or
+ * "shot" (Page.captureScreenshot in the keeper's session, the one that carries the device
+ * metrics, so the image has the emulated DPR; extra: "params":{...},"path":"FILE"). */
+int hold_request(ctx_t *c, const char *op, const char *target, int accept, const char *text, const char *extra, int wait_ms);
 int hold_stop(const char *session);              /* 1 stopped, 0 none */
 void hold_cleanup(const char *session);          /* remove the keeper's files */
 /* manual dialog pending on tid (NULL: any tab): 1 and a one-line description */

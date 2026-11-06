@@ -1,5 +1,6 @@
 /* Emulation keeper (internal command '__hold') and its client helpers. */
 #include "hold.h"
+#include "b64.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -282,7 +283,7 @@ int hold_ready(ctx_t *c) {
     return slim_seterr("emulation keeper (pid %d) did not apply generation %d within %d ms", pid, c->st.gen, WAIT_MS);
 }
 
-int hold_request(ctx_t *c, const char *op, const char *target, int accept, const char *text) {
+int hold_request(ctx_t *c, const char *op, const char *target, int accept, const char *text, const char *extra, int wait_ms) {
     int pid = c->hold_pid ? c->hold_pid : hold_owner(c->session, NULL);
     if (!pid) return slim_seterr("no emulation keeper for session '%s'", c->session);
     long long id = now_ms() * 1000 + getpid() % 1000;
@@ -290,18 +291,20 @@ int hold_request(ctx_t *c, const char *op, const char *target, int accept, const
     sb_printf(&b, "{\"id\":%lld,\"op\":", id); sb_jstrz(&b, op);
     sb_puts(&b, ",\"target\":"); sb_jstrz(&b, target);
     sb_printf(&b, ",\"accept\":%s,\"text\":", accept ? "true" : "false"); sb_jstrz(&b, text);
+    if (extra) { sb_putc(&b, ','); sb_puts(&b, extra); }
     sb_puts(&b, "}\n");
     char p[PATH_MAX];
     int r = hpath(c->session, ".holdreq", p) || write_file(p, b.p, b.n, 1);
     sb_free(&b);
     if (r) return -1;
     kill(pid, SIGUSR1);
-    for (long long dl = now_ms() + WAIT_MS; now_ms() < dl; sleep_ms(5)) {
+    if (wait_ms < WAIT_MS) wait_ms = WAIT_MS;
+    for (long long dl = now_ms() + wait_ms; now_ms() < dl; sleep_ms(5)) {
         hfile h;
         if (hold_read(c->session, &h) || !keeper_valid(h.pid, h.start, c->session)) return slim_seterr("emulation keeper exited");
         if (h.req == id) return h.req_ok ? 0 : slim_seterr("%s", h.err[0] ? h.err : "keeper request failed");
     }
-    return slim_seterr("emulation keeper (pid %d) did not answer within %d ms", pid, WAIT_MS);
+    return slim_seterr("emulation keeper (pid %d) did not answer within %d ms", pid, wait_ms);
 }
 
 int hold_stop(const char *session) {
@@ -357,7 +360,7 @@ typedef struct {
     long *ids; int nids, idcap;
     int want_ack, ack_gen, acked;
     long long ack_dl;
-    char *sig, *ua, *ver;
+    char *sig, *ua, *ver, *req_path;
     long long req_seen, req_done; long req_cmd; int req_ok; char req_err[200];
     unsigned long long start;
 } hold_t;
@@ -508,6 +511,19 @@ static void on_request(hold_t *h) {
         for (int i = 0; i < h->npg; i++) apply_page(h, &h->pg[i], 1, 1);
         begin_ack(h);
         h->req_ok = 1; h->req_done = id;
+    } else if (json_streq_path(doc, "op", "shot")) {
+        char *t = json_get_str(doc, "target");
+        hpage *g = t ? page_by(h, NULL, t) : NULL;
+        jv prm; long cid;
+        free(h->req_path); h->req_path = json_get_str(doc, "path");
+        if (!g || !h->req_path) { snprintf(h->req_err, sizeof h->req_err, "keeper is not attached to tab %s", t ? t : "?"); h->req_done = id; }
+        else {
+            char *ps = json_get(doc, "params", &prm) ? xstrndup(prm.p, prm.n) : NULL;
+            if (cdp_send(&h->cdp, g->sid, "Page.captureScreenshot", ps, &cid) == 0) { h->req_cmd = cid; h->req_done = 0; }
+            else { snprintf(h->req_err, sizeof h->req_err, "%s", slim_errmsg()); h->req_done = id; }
+            free(ps);
+        }
+        free(t);
     } else if (json_streq_path(doc, "op", "dialog")) {
         char *t = json_get_str(doc, "target"), *tx = json_get_str(doc, "text");
         hpage *g = NULL;
@@ -554,9 +570,20 @@ static void on_message(hold_t *h, char *msg, size_t len) {
         long id = (long)json_int(v, -1);
         for (int i = 0; i < h->nids; i++) if (h->ids[i] == id) { h->ids[i] = h->ids[--h->nids]; break; }
         if (h->req_cmd && id == h->req_cmd) {
-            jv e;
+            jv e, d;
             h->req_ok = !json_get(doc, "error", &e);
             if (!h->req_ok) { char *m = json_get_str(e, "message"); snprintf(h->req_err, sizeof h->req_err, "%s", m ? m : "DevTools error"); free(m); }
+            else if (h->req_path) {   /* screenshot: decode in place into the requested file */
+                h->req_ok = 0;
+                if (json_get(doc, "result.data", &d) && d.t == J_STR) {
+                    char *s = (char *)d.p + 1; size_t n = d.n - 2;
+                    long l = memchr(s, '\\', n) ? json_unescape(s, n, s) : (long)n;
+                    long b = l < 0 ? -1 : b64_decode(s, (size_t)l, (unsigned char *)s);
+                    if (b > 0 && write_file(h->req_path, s, (size_t)b, 0) == 0) h->req_ok = 1;
+                    else snprintf(h->req_err, sizeof h->req_err, "screenshot: %s", b > 0 ? slim_errmsg() : "bad image data");
+                } else snprintf(h->req_err, sizeof h->req_err, "screenshot has no data");
+            }
+            free(h->req_path); h->req_path = NULL;
             h->req_done = h->req_seen; h->req_cmd = 0;
             h_write(h);
         }

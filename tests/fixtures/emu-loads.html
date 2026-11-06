@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Emulation loads</title>
+<style>button,a{display:block;width:200px;height:40px;margin:4px}</style></head><body>
+<button id="rl" onclick="setTimeout(function(){location.reload()},300)">reload later</button>
+<button id="go" onclick="setTimeout(function(){location.assign('emu-loads.html?nav=1')},300)">navigate later</button>
+<button id="spa" onclick="history.pushState({},'','emu-loads.html?spa=1');document.title='spa'">client route</button>
+<button id="bu" onclick="window.onbeforeunload=function(e){e.preventDefault();e.returnValue=''};document.title='armed'">arm beforeunload</button>
+<a id="pop" href="emu-loads.html?popup=1" target="_blank">popup</a>
+<script>
+/* every load records what the page sees (localStorage is shared by tabs of this origin) */
+var m = {w: innerWidth, h: innerHeight, o: screen.orientation.type, a: screen.orientation.angle,
+  touch: navigator.maxTouchPoints, coarse: matchMedia('(pointer: coarse)').matches, dpr: devicePixelRatio,
+  sw: screen.width, sh: screen.height, ua: navigator.userAgent,
+  mob: navigator.userAgentData ? navigator.userAgentData.mobile : null,
+  plat: navigator.userAgentData ? navigator.userAgentData.platform : null,
+  url: location.pathname + location.search};
+var l = JSON.parse(localStorage.getItem('loads') || '[]'); l.push(m); localStorage.setItem('loads', JSON.stringify(l));
+</script></body></html>

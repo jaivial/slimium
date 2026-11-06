@@ -403,7 +403,8 @@ static int cmd_dialog(ctx_t *c, int argc, char **argv) {
         if (c->port) return usage_err(c, "dialog policy needs a session (--session), not --port");
         if (ctx_state_reload(c)) return -1;
         char *np = NULL;
-        if (dlg_policy_merge(argc == 2 ? c->st.dlg : NULL, argc == 2 ? argv[1] : NULL, &np)) { c->usage = 1; return -1; }
+        int reset = argc == 2 && !strcmp(argv[1], "reset");
+        if (dlg_policy_merge(argc == 2 && !reset ? c->st.dlg : argc == 2 ? NULL : c->st.dlg, argc == 2 ? argv[1] : NULL, &np)) { c->usage = 1; return -1; }
         if (argc == 2) { int r = dialog_policy_set(c, np); if (r < 0) { free(np); return -1; } }
         static const char *const ty[] = {"beforeunload", "alert", "confirm", "prompt"};
         for (int i = 0; i < 4; i++) out_s(c, ty[i], dlg_action(np, ty[i]));
@@ -465,8 +466,8 @@ static int cmd_dialog(ctx_t *c, int argc, char **argv) {
         char *tid = NULL;
         if (c->tab && ctx_resolve_target(c, c->tab, &tid)) return -1;
         if (!tid && c->st.target) tid = xstrdup(c->st.target);
-        int r = hold_request(c, "dialog", tid, accept, argc == 2 ? argv[1] : NULL);
-        if (r && tid && strstr(slim_errmsg(), "on this tab")) r = hold_request(c, "dialog", NULL, accept, argc == 2 ? argv[1] : NULL);
+        int r = hold_request(c, "dialog", tid, accept, argc == 2 ? argv[1] : NULL, NULL, 0);
+        if (r && tid && strstr(slim_errmsg(), "on this tab")) r = hold_request(c, "dialog", NULL, accept, argc == 2 ? argv[1] : NULL, NULL, 0);
         free(tid);
         if (r) return -1;
         out_s(c, "method", "Page.handleJavaScriptDialog"); out_b(c, "keeper", 1);

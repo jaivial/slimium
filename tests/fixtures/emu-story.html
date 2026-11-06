@@ -1,0 +1,47 @@
+<!doctype html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Story editor fixture</title>
+<style>
+body{margin:0;background:#fff;font:16px sans-serif}
+#c2{position:absolute;left:0;top:0;width:100px;height:100px}
+#gl{position:absolute;left:0;top:120px;width:100px;height:100px}
+#rot{position:absolute;left:0;top:240px;display:none}
+#ed{position:absolute;left:0;top:280px}
+#file{position:absolute;left:0;top:320px;width:200px;height:40px}
+</style></head><body>
+<canvas id="c2" width="300" height="300"></canvas>
+<canvas id="gl" width="300" height="300"></canvas>
+<div id="rot">Rotate your device to add to your story.</div>
+<div id="ed">story</div>
+<input id="file" type="file" accept="image/*">
+<script>
+/* mimics a mobile-only story editor: refuses landscape, routes client-side, then reloads itself */
+function land() { return screen.orientation.type.indexOf('landscape') === 0; }
+function upd() { document.getElementById('rot').style.display = land() ? 'block' : 'none'; }
+upd(); screen.orientation.addEventListener('change', upd); addEventListener('resize', upd);
+var m = {w: innerWidth, h: innerHeight, o: screen.orientation.type, touch: navigator.maxTouchPoints,
+  coarse: matchMedia('(pointer: coarse)').matches, dpr: devicePixelRatio, url: location.pathname};
+var l = JSON.parse(localStorage.getItem('loads') || '[]'); l.push(m); localStorage.setItem('loads', JSON.stringify(l));
+var x = document.getElementById('c2').getContext('2d');
+x.fillStyle = '#ff0000'; x.fillRect(0, 0, 150, 300); x.fillStyle = '#0000ff'; x.fillRect(150, 0, 150, 300);
+var g = document.getElementById('gl').getContext('webgl', {preserveDrawingBuffer: true, antialias: false});
+window.webgl = !!g;
+if (g) {
+  function sh(t, s) { var o = g.createShader(t); g.shaderSource(o, s); g.compileShader(o); return o; }
+  var p = g.createProgram();
+  g.attachShader(p, sh(g.VERTEX_SHADER, 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}'));
+  g.attachShader(p, sh(g.FRAGMENT_SHADER, 'precision mediump float;void main(){gl_FragColor=vec4(0.,1.,0.,1.);}'));
+  g.linkProgram(p); g.useProgram(p);
+  g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
+  g.bufferData(g.ARRAY_BUFFER, new Float32Array([-0.8, -0.8, 0.8, -0.8, 0, 0.8]), g.STATIC_DRAW);
+  g.enableVertexAttribArray(0); g.vertexAttribPointer(0, 2, g.FLOAT, false, 0, 0);
+  g.clearColor(0, 0, 0, 1); g.clear(g.COLOR_BUFFER_BIT); g.drawArrays(g.TRIANGLES, 0, 3);
+}
+if (/\/editor$/.test(location.pathname)) document.getElementById('ed').textContent = 'editor ' + (sessionStorage.getItem('upload') || '');
+document.getElementById('file').onchange = function () {
+  var f = this.files[0];
+  sessionStorage.setItem('upload', f.name + ':' + f.size);
+  history.pushState({}, '', '/story/editor');
+  document.getElementById('ed').textContent = 'uploaded';
+  setTimeout(function () { location.reload(); }, 400);
+};
+</script></body></html>

@@ -253,6 +253,8 @@ int emu_apply_sync(ctx_t *c, int full) {
 int ctx_tap(ctx_t *c, double x, double y, int taps) {
     if (!c->have_st || !emu_touch(&c->st)) return 1;
     char p[160];
+    /* a hidden tab (e.g. behind a popup) never acknowledges touch input: show it first */
+    if (cdp_call(&c->cdp, c->sid, "Page.bringToFront", NULL, c->timeout < 3000 ? c->timeout : 3000, NULL, NULL)) return -1;
     for (int i = 0; i < taps; i++) {
         long a, b;
         snprintf(p, sizeof p, "{\"type\":\"touchStart\",\"touchPoints\":[{\"x\":%.2f,\"y\":%.2f}]}", x, y);

@@ -166,7 +166,7 @@ int cmd_cdp(ctx_t *c, int argc, char **argv) {
         (strstr(argv[0], "DeviceMetrics") || strstr(argv[0], "Touch") || strstr(argv[0], "UserAgent"))) {
         slim_cdp_unselect(c, owned_sid); owned_sid = NULL;
         ctx_reset_page(c);
-        hold_request(c, "reassert", NULL, 0, NULL);
+        hold_request(c, "reassert", NULL, 0, NULL, NULL, 0);
         out_b(c, "keeper_reasserted", 1);
     }
     if (ev_ms > 0) {

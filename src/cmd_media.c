@@ -60,6 +60,8 @@ static int cmd_responsive(ctx_t *c, int argc, char **argv) {
     if (!count) return usage_err(c, "responsive needs at least one size");
     if (ctx_state(c) || ctx_page(c)) return -1;
     if (mkdir_p(argv[0], 0755)) return -1;
+    /* frames (requestAnimationFrame, captures) only happen in a visible tab */
+    if (cdp_call(&c->cdp, c->sid, "Page.bringToFront", NULL, c->timeout, NULL, NULL)) return -1;
     int old_w = c->have_st ? c->st.vp_w : 0, old_h = c->have_st ? c->st.vp_h : 0;
     int old_mobile = c->have_st ? c->st.vp_mobile : 0;
     int old_orient = c->have_st ? c->st.vp_orient : 0, old_touch = c->have_st ? c->st.vp_touch : 0;
