@@ -10,9 +10,16 @@ process tree) on the same workload, and drop-in use as cu's browser (`CU_BROWSER
   Small vendored code is allowed only if written in C and license-compatible (prefer own code).
 - Build: `make` (gcc, `-Os`), `make test`, `make bench`. Warnings are errors (`-Wall -Wextra -Werror`).
 - The slimium binary must stay small (< 300 KB stripped) and its own RSS < 2 MB per command.
-- Never touch the user's running cu daemon (port 8787, CDP 9222, ~/.cache/cu or its data dir) nor
-  ~/cu's main checkout. cu work happens in a separate worktree and a separately deployed `cu-slim`.
-- Never kill processes you did not start. Use unique CDP ports (9300-9399 for tests) and temp profiles.
+- Never touch the user's running cu daemon. It normally uses HTTP 8810 and CDP 9362 (and may walk
+  through 8834/9386); currently another session may own 8810/9363 while systemd retries. Never use
+  8810-8834 or 9362-9386, never touch ~/.cu, and never signal its processes. Do not edit ~/cu's main
+  checkout. cu work happens in a separate worktree and the isolated `cu-slim` (8790-8799/9390-9391).
+- Never kill processes you did not start. Each track uses only its assigned CDP ports and temp profiles.
+- New command modules export `const cmd_def *slim_<track>_commands(size_t *count)`; weak module hooks
+  live in src/cmd_modules.c. Do not edit main.c for ordinary command registration. In-process callers
+  use cli_invoke() (no stdout emission) and inspect ctx_t.oj/ot.
+- Named user profiles are distinct from memory profiles: `--profile` remains off|balanced|max; use
+  `--user NAME` / SLIM_USER_PROFILE for a persistent website-login profile.
 - Output for agents: compact, one JSON object per line with `--json`; plain text otherwise.
   Exit code 0 on success, non-zero with a one-line error on stderr.
 

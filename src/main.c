@@ -79,6 +79,7 @@ static int cmd_help(ctx_t *c, int argc, char **argv) {
              "global options: --session NAME (default: $SLIM_SESSION or 'default'), --port N (any CDP browser),\n"
              "  --tab ID, --json (one JSON object per line), --timeout MS (default 30000)\n\ncommands:\n", SLIM_VERSION);
     for (size_t i = 0; i < NCMDS; i++) out_t(c, "  %-14s %s\n", CMDS[i].name, CMDS[i].help);
+    slim_help_modules(c);
     out_t(c, "\nwrapper: invoked as 'slimium-chrome' (or 'slimium chrome ...') it execs the engine\n"
              "  (env SLIM_CHROMIUM, SLIM_PROFILE=off|balanced|max, SLIM_WRAPPER_LOG=FILE) in its own systemd\n"
              "  scope (SLIM_SCOPE=0: no scope) with a detached memory governor (SLIM_GOV=0: none; SLIM_GOV_LOG=FILE,\n"
@@ -96,7 +97,7 @@ static int cmd_version(ctx_t *c, int argc, char **argv) {
 
 static const cmd_def *find_cmd(const char *n) {
     for (size_t i = 0; i < NCMDS; i++) if (!strcmp(CMDS[i].name, n)) return &CMDS[i];
-    return NULL;
+    return slim_find_module(n);
 }
 
 /* Extract global options anywhere before "--". Returns 0, or -1 on usage error. */
@@ -173,17 +174,21 @@ static void emit(ctx_t *c, const char *name, int rc, int force_json) {
     fflush(stdout);
 }
 
-/* run one command; returns exit code */
-static int run(ctx_t *c, int argc, char **argv, int force_json) {
+/* Invoke without emitting: output remains in c->oj/c->ot for MCP and embedders. */
+int cli_invoke(ctx_t *c, int argc, char **argv) {
     sb_reset(&c->oj); sb_reset(&c->ot); c->usage = 0;
-    if (argc < 1) { usage_err(c, "no command (try: slimium help)"); emit(c, "", -1, force_json); return 2; }
+    if (argc < 1) return usage_err(c, "no command (try: slimium help)");
     const cmd_def *d = find_cmd(argv[0]);
-    int rc;
-    if (!d) { usage_err(c, "unknown command '%s' (try: slimium help)", argv[0]); rc = -1; }
-    else if (c->in_batch && (d->flags & CF_NOBATCH)) { usage_err(c, "'%s' is not allowed in batch", d->name); rc = -1; }
-    else if (!d->fn) { usage_err(c, "'%s' must be the first argument", d->name); rc = -1; }
-    else rc = d->fn(c, argc - 1, argv + 1) ? -1 : 0;
-    emit(c, argv[0], rc, force_json);
+    if (!d) return usage_err(c, "unknown command '%s' (try: slimium help)", argv[0]);
+    if (c->in_batch && (d->flags & CF_NOBATCH)) return usage_err(c, "'%s' is not allowed in batch", d->name);
+    if (!d->fn) return usage_err(c, "'%s' must be the first argument", d->name);
+    return d->fn(c, argc - 1, argv + 1) ? -1 : 0;
+}
+
+/* run one command; returns process exit code */
+static int run(ctx_t *c, int argc, char **argv, int force_json) {
+    int rc = cli_invoke(c, argc, argv);
+    emit(c, argc > 0 ? argv[0] : "", rc, force_json);
     return rc == 0 ? 0 : c->usage ? 2 : 1;
 }
 

@@ -131,4 +131,9 @@ int cmd_mem(ctx_t *, int, char **);
 int cmd_purge(ctx_t *, int, char **);
 int cmd_cdp(ctx_t *, int, char **);
 
+/* Command modules and in-process invocation (used by MCP and tests). */
+const cmd_def *slim_find_module(const char *name);
+void slim_help_modules(ctx_t *c);
+int cli_invoke(ctx_t *c, int argc, char **argv); /* no stdout emission */
+
 #endif
