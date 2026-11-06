@@ -58,8 +58,10 @@ commands.
 
 The video canvas is fixed from the first frame (rounded up to even dimensions for YUV420). Later
 frames are aspect-fitted and black-padded to that canvas. This lets the encoder survive live
-viewport changes without reinitializing the stream. The worker watches the saved session viewport
-and reapplies changes on its own CDP session. Screenshot and regular CLI commands remain usable
+viewport changes without reinitializing the stream. While the session's keeper runs, it owns the
+overrides and the worker only follows them. A second session setting metrics would reset them when
+it detaches. Without a keeper, the worker watches the saved session viewport and reapplies changes
+on its own CDP session. Screenshot and regular CLI commands remain usable
 while recording.
 
 ## Live viewport and responsive screenshots
@@ -67,23 +69,39 @@ while recording.
 ~~~sh
 slimium viewport 800 600
 slimium resize 900 500                 # alias
-slimium viewport 390 844 --scale 2 --mobile
-slimium viewport mobile                # 375x812
-slimium viewport tablet                # 768x1024
-slimium viewport desktop               # 1440x900
+slimium viewport 390 844 --scale 3 --mobile   # + touch, portrait (auto from W/H)
+slimium viewport 844 390 --mobile --orientation landscape --no-touch
+slimium viewport mobile                # 390x844 dpr 3, mobile, touch, portrait, Android phone UA
+slimium viewport tablet                # 768x1024 dpr 2, mobile, touch, portrait, Android tablet UA
+slimium viewport desktop               # 1440x900 dpr 1, no touch, default UA
 slimium viewport reset
 slimium responsive shots --sizes 375x812,768x1024,1440x900
 ~~~
 
-Named presets are exact CSS-pixel dimensions and do not implicitly enable mobile emulation;
-`--mobile` remains an explicit option. Existing saved-session behavior is retained: every new
-slimium attach reapplies the metrics override, updating innerWidth/innerHeight and CSS media
-queries without navigation. Screenshots and recording see the new size immediately.
+The viewport is **persistent**. The session's emulation keeper (docs/EMULATION.md) holds the
+override in its own DevTools session. Reloads and navigations, by slimium or by the page itself
+(`location.reload()`, SPA routes), keep the exact screen size, orientation, DPR and touch. So do
+new tabs and popups from their first load. Changes apply live, without navigation: innerWidth,
+CSS media queries, `screen.orientation` and its change event.
 
-`responsive` applies each size to the already-open page, waits two animation frames, verifies the
-exact DOM viewport, writes `OUTDIR/WxH.png`, and restores the prior override (or native viewport)
-before returning. It restores on errors as well. It does not change the saved viewport or reload
-the page. In stateless `--port` mode, restoration means clearing the override because there is no
+- Screen size equals the viewport (`screenWidth`/`screenHeight`).
+- Orientation is portrait-primary/0 when H >= W, else landscape-primary/90. `--orientation`
+  forces it.
+- Touch (`maxTouchPoints` 5, `pointer: coarse`, `ontouchstart`) is on with `--mobile` unless
+  `--no-touch`, or on with `--touch`. While it is on, `click` sends real touch taps.
+- Presets set the Android UA and userAgentData from the engine's major version, unless an explicit
+  `ua` is set (explicit always wins). `viewport reset` and `desktop` restore the default UA.
+  Without an explicit UA, headless sessions report `Chrome/` instead of `HeadlessChrome/`
+  (`SLIM_KEEP_HEADLESS_UA=1` keeps it).
+- `shot` is captured by the keeper, so screenshots have the emulated DPR (390x844 at dpr 3 ->
+  1170x2532 PNG).
+- Without a keeper (`SLIM_HOLD=0`, `--port`), the old behaviour applies: re-applied by every
+  command, lost between commands.
+
+`responsive` brings the tab to the front (frames only happen in a visible tab). For each size it
+applies the size to the already-open page through the keeper, waits two animation frames,
+verifies the exact DOM viewport, and writes `OUTDIR/WxH.png`. Before returning it restores the
+prior viewport (or the native one). It restores on errors as well, and never reloads the page. In stateless `--port` mode, restoration means clearing the override because there is no
 saved session viewport.
 
 ## Tests

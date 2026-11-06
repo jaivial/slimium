@@ -113,6 +113,11 @@ Nothing is written to stdout or stderr. With `SLIM_GOV=0` the wrapper is exactly
   does not. On SIGINT/SIGTERM of a foreground governor every hibernated tab is restored.
   **Caveat**: the first command of the client that triggers the restore races with it and can
   still see about:blank (tests/gov.sh: the first `url` returns about:blank, the next one the real URL).
+  **With the session's emulation keeper** (docs/EMULATION.md), every tab is always attached. The
+  keeper marks itself in `<udd>/.slimium-keeper`. While it lives, "no client attached" is not
+  required (age/recency only). Hibernated tabs are listed in `<udd>/.slimium-hibernated`, and the
+  next slimium command for such a tab restores it itself before running (no race). The governor
+  logs it as `restore ... "by":"client"`.
 
 Events are written as JSON lines to `SLIM_GOV_LOG` (start, idle, active, pass, reclaim, grown,
 skip-foreign, skip-no-reclaim, hibernate, restore, no-cdp, exit). `SLIM_GOV_MEASURE=1` adds iso
