@@ -19,7 +19,8 @@ OBJS := $(SRCS:src/%.c=$(BUILD)/%.o)
 LIBSRCS := src/util.c src/json.c src/b64.c src/ws.c
 HDRS := $(wildcard src/*.h)
 
-.PHONY: all test test-asan test-gov unit clean install uninstall asan bench size
+.PHONY: all test test-modules test-cu test-asan test-gov unit clean install uninstall asan bench size
+MODULE_TESTS := tests/profiles.sh tests/interaction.sh tests/media.sh tests/protocol.sh tests/mcp.sh
 all: slimium slimium-chrome
 
 $(BUILD)/%.o: src/%.c $(HDRS) | $(BUILD)
@@ -50,6 +51,16 @@ asan: $(SRCS) $(HDRS) tests/unit.c
 test: all unit
 	tests/run.sh
 	tests/gov.sh
+	@$(MAKE) -s test-modules
+
+# Optional module suites are present after their tracks are merged.
+test-modules: all
+	@set -e; for t in $(MODULE_TESTS); do if [ -f "$$t" ]; then echo "== $$t"; bash "$$t"; fi; done
+
+# End-to-end second-cu checks (isolated from the user's daemon).
+test-cu: all
+	bash tests/cu/run.sh
+	@if [ -f tests/cu/mcp-integration.sh ]; then bash tests/cu/mcp-integration.sh; fi
 
 # memory governor: scope, reclaim limited to the browser's own cgroups, hibernation, wrapper (CDP 9440-9442)
 test-gov: all
