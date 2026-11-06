@@ -5,6 +5,7 @@
 <p id="status">writing test-only state</p>
 <script>
 document.cookie = 'slim_test_cookie=cookie-marker-7451; Max-Age=86400; Path=/; SameSite=Lax';
+document.cookie = 'slim_test_session=session-marker-7451; Path=/; SameSite=Lax';
 localStorage.setItem('slim_test_local', 'local-marker-7451');
 const req = indexedDB.open('slimium-profile-test', 1);
 req.onupgradeneeded = () => req.result.createObjectStore('kv');

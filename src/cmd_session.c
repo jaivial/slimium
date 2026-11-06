@@ -199,6 +199,45 @@ static void tail_log(const char *path, char *out, size_t n) {
     free(d);
 }
 
+
+/* Session restore is enabled for its cookie semantics. Keep slimium start's
+ * established one-blank-tab behavior; 'profile restore' restores saved tabs. */
+static int prune_restored_tabs(const char *wsurl, int timeout) {
+    cdp_t cd;
+    if (cdp_connect(&cd, wsurl, timeout < 3000 ? timeout : 3000)) return -1;
+    int stable = 0;
+    /* Session restore can publish more targets after the first listing. Require two
+     * stable reads 50 ms apart, while retaining best-effort behavior on slow pages. */
+    for (int attempt = 0; attempt < 60 && stable < 2; attempt++) {
+        char *resp = NULL; jv res, arr, target;
+        if (cdp_call(&cd, NULL, "Target.getTargets", NULL, timeout, &resp, &res) ||
+            !json_get(res, "targetInfos", &arr)) {
+            free(resp); cdp_close(&cd); return slim_seterr("could not inspect restored startup tabs");
+        }
+        size_t pos = 0; int pages = 0, blanks = 0, closed = 0;
+        while (json_next(arr, &pos, NULL, &target)) {
+            if (!json_streq_path(target, "type", "page")) continue;
+            char *id = json_get_str(target, "targetId"), *url = json_get_str(target, "url");
+            int blank = url && !strcmp(url, "about:blank");
+            pages++; if (blank) blanks++;
+            int keep = blank && blanks == 1;
+            if (!keep && id) {
+                sbuf params = {0}; sb_puts(&params, "{\"targetId\":"); sb_jstrz(&params, id); sb_putc(&params, '}');
+                /* A restored page may close itself during startup; pruning is best-effort. */
+                cdp_call(&cd, NULL, "Target.closeTarget", params.p, timeout, NULL, NULL);
+                sb_free(&params); closed++;
+            }
+            free(id); free(url);
+        }
+        free(resp);
+        if (pages == 1 && blanks == 1 && !closed) stable++;
+        else stable = 0;
+        if (stable < 2) sleep_ms(50);
+    }
+    cdp_close(&cd);
+    return 0;
+}
+
 /* ---- commands ---- */
 int cmd_start(ctx_t *c, int argc, char **argv) {
     const char *prof = opt_val(c, &argc, argv, "--profile");
@@ -276,6 +315,9 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
     sb_free(&ud);
     if (user && userprof_check_idle(user)) { free(engine); return -1; }
 
+    int keep_session_tabs = 0;
+    for (int i = 0; i < argc; i++)
+        if (!strcmp(argv[i], "--restore-last-session")) keep_session_tabs = 1;
     char ua_arg[2080], lang_arg[160];
     int have_ua = 0, have_lang = 0;
     if (user) {
@@ -349,6 +391,12 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
             return slim_seterr("browser DevTools did not come up on port %d within %d ms (log %s)", port, c->timeout, logp);
         }
         sleep_ms(50);
+    }
+    if (user && !keep_session_tabs && prune_restored_tabs(wsurl, c->timeout)) {
+        kill(-pid, SIGTERM);
+        if (!wait_gone(pid, 2000)) kill(-pid, SIGKILL);
+        waitpid(pid, NULL, 0);
+        free(wsurl); free(engine); return -1;
     }
 
     slim_state s; memset(&s, 0, sizeof s);

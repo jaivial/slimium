@@ -16,7 +16,8 @@ function readProfileState() {
       get.onsuccess = () => resolve({
         cookie: (document.cookie.match(/(?:^|; )slim_test_cookie=([^;]*)/) || [])[1] || null,
         local: localStorage.getItem('slim_test_local'),
-        idb: get.result || null
+        idb: get.result || null,
+        session: (document.cookie.match(/(?:^|; )slim_test_session=([^;]*)/) || [])[1] || null
       });
     };
   });
