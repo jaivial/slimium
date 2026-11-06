@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Profile set fixture</title>
+<h1>Profile set fixture</h1>
+<p id="status">writing test-only state</p>
+<script>
+document.cookie = 'slim_test_cookie=cookie-marker-7451; Max-Age=86400; Path=/; SameSite=Lax';
+localStorage.setItem('slim_test_local', 'local-marker-7451');
+const req = indexedDB.open('slimium-profile-test', 1);
+req.onupgradeneeded = () => req.result.createObjectStore('kv');
+req.onerror = () => { document.querySelector('#status').textContent = 'error'; };
+req.onsuccess = () => {
+  const tx = req.result.transaction('kv', 'readwrite');
+  tx.objectStore('kv').put('idb-marker-7451', 'login-marker');
+  tx.oncomplete = () => {
+    document.querySelector('#status').textContent = 'ready';
+    window.profileFixtureReady = true;
+  };
+};
+</script>

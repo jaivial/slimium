@@ -3,6 +3,7 @@
 #include "gov.h"
 #include "mem.h"
 #include "profile.h"
+#include "userprof.h"
 #include <arpa/inet.h>
 #include <dirent.h>
 #include <errno.h>
@@ -96,6 +97,27 @@ int wrapper_main(int argc, char **argv) {
     const char *gv = getenv("SLIM_GOV");
     int gov = !ver && !(gv && !strcmp(gv, "0"));
     if (gov) { char *pe = slim_engine_private(engine); if (pe) { free(engine); engine = pe; slim_engine_libs(engine); } }
+    int wargc = argc;
+    char **wargv = argv;
+    char user_dir[PATH_MAX], user_arg[PATH_MAX + 20];
+    const char *user = getenv("SLIM_USER_PROFILE");
+    if (!ver && user && *user) {
+        if (userprof_data_dir(user, user_dir, sizeof user_dir) || userprof_check_idle(user)) {
+            fprintf(stderr, "slimium-chrome: %s\n", slim_errmsg()); return 127;
+        }
+        snprintf(user_arg, sizeof user_arg, "--user-data-dir=%s", user_dir);
+        wargv = xmalloc(sizeof *wargv * (size_t)(argc + 2));
+        wargv[0] = argv[0];
+        int k = 1;
+        for (int i = 1; i < argc; i++) {
+            if (!strcmp(argv[i], "--user-data-dir")) { if (i + 1 < argc) i++; continue; }
+            if (!strncmp(argv[i], "--user-data-dir=", 16)) continue;
+            wargv[k++] = argv[i];
+        }
+        wargv[k++] = user_arg;
+        wargv[k] = NULL;
+        wargc = k;
+    }
     char **av;
     if (ver) {
         av = xmalloc(sizeof *av * (size_t)(argc + 1));
@@ -109,14 +131,14 @@ int wrapper_main(int argc, char **argv) {
             level = slim_profile_parse(ps);
             if (level < 0) { fprintf(stderr, "slimium-chrome: bad SLIM_PROFILE '%s', using balanced\n", ps); level = SLIM_PROFILE_BALANCED; }
         }
-        av = slim_profile_merge_argv(level, engine, argc - 1, argv + 1);
+        av = slim_profile_merge_argv(level, engine, wargc - 1, wargv + 1);
         if (!av) { fprintf(stderr, "slimium-chrome: out of memory\n"); return 127; }
     }
     log_argv(av);
     if (gov) {
         /* own the page cache, fork the detached governor, then exec in a scope keeping this pid */
         const char *udd = NULL;
-        int port = slim_gov_argv_port(argc - 1, argv + 1, &udd);
+        int port = slim_gov_argv_port(wargc - 1, wargv + 1, &udd);
         slim_engine_fadvise(engine);
         slim_gov_spawn(getpid(), port, udd, 1);
         char **sv = slim_scope_argv(av, getpid());
@@ -180,6 +202,7 @@ static void tail_log(const char *path, char *out, size_t n) {
 /* ---- commands ---- */
 int cmd_start(ctx_t *c, int argc, char **argv) {
     const char *prof = opt_val(c, &argc, argv, "--profile");
+    const char *user = opt_val(c, &argc, argv, "--user");
     int headful = opt_flag(&argc, argv, "--headful");
     const char *udd = opt_val(c, &argc, argv, "--user-data-dir");
     const char *eng = opt_val(c, &argc, argv, "--engine");
@@ -196,6 +219,19 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
     int ww = 0, wh = 0;
     if (win && (sscanf(win, "%dx%d", &ww, &wh) != 2 || ww < 100 || wh < 100 || ww > 16384 || wh > 16384))
         return usage_err(c, "bad --window '%s' (WxH)", win);
+    const char *user_env = getenv("SLIM_USER_PROFILE");
+    if (!user && user_env && *user_env) user = user_env;
+    char default_user[65];
+    if (!user && !udd) {
+        char *selected = NULL;
+        int dr = userprof_default(&selected);
+        if (dr < 0) return -1;
+        if (dr == 0) {
+            snprintf(default_user, sizeof default_user, "%s", selected);
+            user = default_user;
+        }
+        free(selected);
+    }
 
     slim_state old;
     if (state_load(c->session, &old) == 0) {
@@ -223,7 +259,11 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
     if (gov_on) { char *pe = slim_engine_private(engine); if (pe) { free(engine); engine = pe; slim_engine_libs(engine); } }
 
     sbuf ud = {0};
-    if (udd) sb_puts(&ud, udd);
+    if (user) {
+        char named[PATH_MAX];
+        if (userprof_data_dir(user, named, sizeof named)) { free(engine); return -1; }
+        sb_puts(&ud, named);
+    } else if (udd) sb_puts(&ud, udd);
     else {
         const char *x = getenv("XDG_DATA_HOME"), *h = getenv("HOME");
         if (x && *x == '/') sb_printf(&ud, "%s/slimium/%s", x, c->session);
@@ -234,6 +274,21 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
     char rud[PATH_MAX];
     if (!realpath(ud.p, rud)) snprintf(rud, sizeof rud, "%s", ud.p);
     sb_free(&ud);
+    if (user && userprof_check_idle(user)) { free(engine); return -1; }
+
+    char ua_arg[2080], lang_arg[160];
+    int have_ua = 0, have_lang = 0;
+    if (user) {
+        userprof_t up;
+        if (userprof_load(user, &up)) { free(engine); return -1; }
+        if (up.ua && *up.ua) {
+            snprintf(ua_arg, sizeof ua_arg, "--user-agent=%s", up.ua); have_ua = 1;
+        }
+        if (up.locale && *up.locale) {
+            snprintf(lang_arg, sizeof lang_arg, "--lang=%s", up.locale); have_lang = 1;
+        }
+        userprof_free(&up);
+    }
 
     char logp[4096];
     if (state_path(c->session, ".log", logp, sizeof logp)) { free(engine); return -1; }
@@ -243,7 +298,7 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
     snprintf(a_port, sizeof a_port, "--remote-debugging-port=%d", port);
     snprintf(a_udd, sizeof a_udd, "--user-data-dir=%s", rud);
     snprintf(a_win, sizeof a_win, "--window-size=%d,%d", ww, wh);
-    char **args = xmalloc(sizeof *args * (size_t)(argc + 8));
+    char **args = xmalloc(sizeof *args * (size_t)(argc + 12));
     int n = 0;
     args[n++] = a_port; args[n++] = a_udd;
     /* chrome-headless-shell is always headless and has no --headless=new mode */
@@ -251,6 +306,8 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
     if (win) args[n++] = a_win;
     args[n++] = "--no-first-run";
     args[n++] = "--no-default-browser-check";
+    if (have_ua) args[n++] = ua_arg;
+    if (have_lang) args[n++] = lang_arg;
     for (int i = 0; i < argc; i++) args[n++] = argv[i];
     args[n++] = "about:blank";
     args[n] = NULL;
@@ -299,6 +356,7 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
     s.pid = (int)pid; s.port = port; s.headless = !headful;
     s.ws = wsurl;
     s.profile = xstrdup(prof);
+    if (user) s.user = xstrdup(user);
     s.udd = xstrdup(rud);
     s.engine = engine;
     s.log = xstrdup(logp);
@@ -307,9 +365,12 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
     pid_t gpid = gov_on ? slim_gov_spawn(pid, port, rud, 0) : 0;
     out_t(c, "started session %s: pid %d port %d profile %s%s", s.name, s.pid, port, prof, headful ? " (headful)" : "");
     if (gpid > 0) out_t(c, ", governor pid %d", (int)gpid);
+    if (user) out_t(c, " user %s", user);
     out_i(c, "governor", gpid > 0 ? gpid : 0);
     out_s(c, "session", s.name); out_i(c, "pid", s.pid); out_i(c, "port", port);
-    out_s(c, "ws", s.ws); out_s(c, "profile", prof); out_s(c, "user_data_dir", rud);
+    out_s(c, "ws", s.ws); out_s(c, "profile", prof);
+    if (user) out_s(c, "user", user);
+    out_s(c, "user_data_dir", rud);
     out_b(c, "headless", !headful); out_s(c, "engine", engine); out_s(c, "log", logp);
     state_free(&s);
     return 0;
@@ -396,6 +457,10 @@ int cmd_status(ctx_t *c, int argc, char **argv) {
         out_b(c, "attached", c->st.attached);
         if (c->st.attached) out_t(c, "attached yes\n");
         if (c->st.target) { out_t(c, "tab      %s\n", c->st.target); out_s(c, "tab", c->st.target); }
+        if (c->st.user) {
+            out_t(c, "user     %s\n", c->st.user); out_s(c, "user", c->st.user);
+            if (c->st.udd) { out_t(c, "data     %s\n", c->st.udd); out_s(c, "user_data_dir", c->st.udd); }
+        }
     }
     out_t(c, "tabs     %d", tabs); out_i(c, "tabs", tabs);
     if (have_mem) {
