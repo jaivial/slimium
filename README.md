@@ -128,7 +128,7 @@ Exit codes: 0 ok, 1 error (one line on stderr), 2 usage error. `SLIM_DEBUG=1` tr
 | `snapshot` / `find` / `inspect` | compact element tree, stable `@eN` refs and element details |
 | `act JSON\|@file\|-` / `pipe` | action arrays / persistent NDJSON pipeline over one connection |
 | `upload` / `drag` / `focus` / `submit` / `form fill` | additional form and element operations |
-| `profile create\|list\|use\|save\|restore\|...` | named persistent user profiles and tab-session restore |
+| `profile create\|list\|use\|save\|restore\|password-store\|...` | named persistent user profiles (pinned cookie password store) and tab-session restore |
 | `record start\|stop\|status\|list` | browser-tab video recording via screencast + runtime ffmpeg |
 | `resize W H` / `responsive OUTDIR --sizes ...` | live viewport resize (alias of `viewport`) and multi-breakpoint screenshots |
 | `protocol domains\|methods\|events\|show\|coverage` | live CDP schema discovery; `cdp-listen` collects events |

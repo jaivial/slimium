@@ -17,7 +17,7 @@ override it (tests always use a fresh temporary override). Its layout is:
 ```
 <root>/.lock                 flock-serializes registry updates
 <root>/.current              default selected by 'profile use' (optional)
-<root>/NAME/profile.json     mode 0600; preferences and optional tab snapshot
+<root>/NAME/profile.json     mode 0600; preferences, pinned password store, optional tab snapshot
 <root>/NAME/data/            mode 0700; Chromium --user-data-dir
 <root>/NAME/data/Default/Preferences 0600; Chromium settings, session restore enabled
 ```
@@ -26,8 +26,8 @@ The root and profile directories are mode 0700. Metadata and default-selection u
 fsynced temporary file plus atomic rename. Names are 1-64 ASCII letters, digits, `_`, `-`, or
 `.`; a leading dot, empty names, slashes, whitespace, and traversal are rejected.
 
-`profile.json` contains only the name, creation/update times, optional user agent and locale, and
-(after `profile save`) page URLs, the current-page index, and scroll coordinates. It never receives
+`profile.json` contains only the name, creation/update times, optional user agent and locale, the
+pinned `password_store` (see below), and (after `profile save`) page URLs, the current-page index, and scroll coordinates. It never receives
 cookie values, localStorage values, IndexedDB values, passwords, or tokens read from browser storage.
 URLs themselves can be sensitive (including query parameters), so protect metadata as carefully as
 browser history. There is deliberately no storage-state export/import command.
@@ -35,13 +35,14 @@ browser history. There is deliberately no storage-state export/import command.
 ## CLI
 
 ```sh
-slimium profile create NAME [--ua 'User Agent'] [--locale en-US]
+slimium profile create NAME [--ua 'User Agent'] [--locale en-US] [--password-store basic|gnome-libsecret|kwallet5|kwallet6]
 slimium profile list
 slimium profile use NAME          # default for future 'slimium start'
 slimium profile current
 slimium profile show NAME
 slimium profile rename OLD NEW    # inactive profiles only
 slimium profile delete NAME --yes # inactive profiles only; irreversible
+slimium profile password-store NAME STORE  # re-pin an inactive profile (refused if it would lose cookies)
 
 slimium start --user NAME [--profile balanced] [--port N]
 slimium --session S profile save
@@ -71,6 +72,83 @@ start. Later explicit Chromium arguments can still override them.
 also records `user`, so subsequent CLI commands do not need to repeat it. Renaming or deleting an
 active profile is rejected. Renaming an inactive profile moves its data and updates the default;
 deletion requires `--yes`, stays below the validated registry root, and never follows symlinks.
+
+## Password store (cookie encryption) pinning
+
+Chromium on Linux encrypts every cookie value (and saved passwords) with a key chosen by
+`--password-store`:
+
+| store | key | value prefix |
+|---|---|---|
+| `basic` | a fixed key compiled into Chromium | `v10` |
+| `gnome-libsecret`, `kwallet5`, `kwallet6` | a random key kept in the desktop keyring | `v11` |
+
+Without the switch Chromium picks the keyring of the current desktop (GNOME with a session D-Bus
+→ libsecret, `v11`) or `basic` when there is none. A Chromium launched with a store that cannot
+decrypt an existing cookie **deletes that cookie**. A keyring store can still read `v10` values,
+but `basic` can never read `v11` values, and one keyring cannot read another keyring's `v11`.
+
+This caused real data loss: `slimium start --user NAME` used to launch Chromium without
+`--password-store` (so on GNOME the login cookies were written as `v11`), while cu launches its
+browser through `slimium-chrome` with `--password-store=basic`. Opening the same profile under cu
+deleted the keyring-encrypted login cookies; only the cookies cu wrote afterwards (`v10`) remained.
+
+Every named profile therefore pins its store in `profile.json` (`"password_store"`):
+
+- **New profiles default to `basic`.** It is deterministic and works headless, under systemd, over
+  SSH, and under cu (which forces `basic`). `basic` is *obfuscation, not encryption*: the key is
+  public. The protection of a `basic` profile is the 0700 registry/data directories (and disk
+  encryption); treat the data dir like a password file. `profile create NAME --password-store
+  gnome-libsecret` (or `kwallet5`/`kwallet6`) chooses a keyring explicitly; such a profile then
+  needs the unlocked keyring and a session D-Bus on every launch.
+- **Legacy profiles** (created before the field existed) get it detected on first use (any launch
+  or `profile show`): if any cookie in `data/Default/Cookies` carries the `v11` prefix, the
+  desktop's keyring store (`kwallet6`/`kwallet5` on KDE per `KDE_SESSION_VERSION`, otherwise
+  `gnome-libsecret`), else `basic`. The value is persisted atomically (locked registry, fsync,
+  rename) and a one-line note is printed on stderr. A database that cannot be parsed is not
+  guessed: the command fails and asks for an explicit `profile password-store NAME STORE`.
+- **Enforcement:** `slimium start --user NAME` (and the `profile use` default) always passes
+  `--password-store=<pinned>`. `slimium-chrome` with `SLIM_USER_PROFILE=NAME` **replaces** every
+  caller `--password-store` (`--password-store=X`, `-password-store=X`, `--password-store X`) with
+  the pinned value, exactly as it replaces `--user-data-dir`: the identity setting wins over the
+  launcher. A caller value that differed is logged on stderr, e.g.
+  `slimium-chrome: user profile 'NAME' pins --password-store=basic; replaced caller
+  --password-store=gnome-libsecret`. Extra arguments to `start --user` are treated the same way.
+  Without `--user`, `SLIM_USER_PROFILE`, or a `profile use` default nothing changes: caller
+  switches pass through untouched and no switch is added.
+- **Guard:** before every named launch slimium counts the encryption prefixes in the cookie
+  database (read-only). If the pin is `basic` but `v11` cookies exist (for example a hand-edited
+  `profile.json`), or the pin is a keyring and `v11` cookies exist but no session D-Bus is
+  reachable, the launch is refused with an explicit error *before Chromium starts*, so nothing
+  is deleted. `profile password-store NAME STORE` re-pins an inactive profile and refuses any
+  change that would make existing `v11` cookies unreadable. If the database cannot be parsed, a
+  pinned profile still launches (warning on stderr): the pin is the primary protection.
+- `profile show` prints `password_store` and the number of `v10`, `v11`, and other encrypted
+  cookies (counts only; no cookie name or value is read out). `profile list --json` includes the
+  pinned value; `start --json` reports `password_store` for named sessions.
+
+The cookie database is parsed by a small dependency-free reader of the SQLite file format
+(`src/cookiedb.c`: b-tree pages, records, overflow chains, and WAL frames left by a crash). It
+opens the file `O_RDONLY`/`O_NOFOLLOW`, compares only the first three bytes of each
+`encrypted_value`, never decrypts anything, and needs neither libsqlite3 nor the `sqlite3` CLI.
+Chromium 156 keeps the database in rollback-journal mode; a hot journal left by a crash is not
+replayed (the scan sees the main file).
+
+### cu and keyring profiles
+
+cu forces `--password-store=basic`. With the default `basic` pin this agrees with cu. A profile
+pinned to a keyring keeps using that keyring under cu too (the wrapper replaces cu's `basic`), so it
+works only where cu's daemon has the user's session D-Bus and an unlocked keyring; a systemd user
+service started outside the graphical session usually lacks `DBUS_SESSION_BUS_ADDRESS`, and the
+guard then refuses to launch rather than lose the cookies. Prefer `basic` for agent profiles.
+
+### Recovery
+
+Cookies that Chromium has already deleted **cannot be recovered**: the deletion is in Chromium's
+own database and slimium keeps no copy (by design it never exports cookie values). Log in again
+(for example `slimium start --user NAME --headful`). With the fix the profile is pinned, so the new
+login stays readable by both `slimium start` and cu. To move a keyring-pinned profile to `basic`
+there is no conversion: create a new `basic` profile and log in there.
 
 ## Session cookies and Chromium session restore
 
@@ -176,12 +254,14 @@ required.
   browser already using the same named data dir. Chromium's own profile singleton lock remains the
   race-safe backstop if two starts pass the check simultaneously. Different named profiles have
   separate cookie/localStorage/IndexedDB namespaces and can run simultaneously.
-- **Encryption:** directory modes are access control, not encryption. Chromium may encrypt some
-  cookies using the host OS/keyring, depending on platform and build; slimium adds no encryption and
-  does not manage keys. Protect the whole data dir and registry backups. A headless host without an
-  OS keyring may have different at-rest protection.
+- **Encryption:** directory modes are access control, not encryption. Chromium encrypts cookies
+  with the pinned password store (above); with `basic` that is obfuscation with a public key.
+  slimium adds no encryption and does not manage keys. Protect the whole data dir and registry
+  backups.
 - **No secret export:** registry commands do not print browser storage. `profile show` does print
-  saved URLs and preferences. Chromium cookie/session database values are never read by slimium.
+  saved URLs and preferences. slimium reads only the 3-byte encryption prefix of each cookie in
+  Chromium's cookie database (to pin and guard the password store); values are never read out,
+  decrypted, logged, or printed.
 - **Real sites:** tests use only a local fixture, never Instagram/Google or a logged-in personal
   browser. The same mechanism applies to real login state because those sites also persist identity
   in Chromium cookies and origin storage below the data dir. Site-specific encryption, expiring
@@ -203,6 +283,20 @@ session-cookie + persistent-cookie + localStorage + IndexedDB persistence, SIGKI
 its recorded browser process group, profile isolation and duplicate rejection, explicit and saved
 tab restoration, two `SLIM_USER_PROFILE` wrapper restarts with conflicting cu-style data dirs, and
 no-follow deletion.
+
+Password-store checks in the same suite: new profiles pin `basic`; a named start overriding a caller
+`--password-store`; persistent + session cookies + localStorage written by `start` and read back
+through the wrapper with a caller `--password-store=basic`, `--password-store=gnome-libsecret`, and
+none (database stays `v10` only, our scanner matches SQLite's own count); argv rewriting of all
+switch spellings via a fake engine, and the unnamed wrapper unchanged; the mismatch guard (start and
+wrapper refuse, database byte-identical, no engine executed, no-D-Bus refusal, re-pin rules);
+legacy detection from crafted `v10`/`v11`/KDE/no-database/corrupt fixtures (made with python3's
+stdlib `sqlite3`, test-only) and from a real Chromium profile whose pin was stripped. When a usable
+keyring exists, a `gnome-libsecret` profile is written, then opened cu-style with
+`--password-store=basic` (pinned and legacy/stripped) and its `v11` cookies survive; otherwise the
+suite prints `== keyring checks skipped: ...`. `make unit` checks the scanner against SQLite files
+generated by the `sqlite3` CLI (page sizes 512/4096/65536, overflow chains, an uncheckpointed WAL)
+and 400 corrupted/truncated variants (skipped with a message when the CLI is absent).
 
 When the optional deployed `~/.local/bin/cu-slim` integration is available, the suite also starts
 its own daemon on HTTP 8792 and CDP 9392 with a fresh temporary `CU_SLIM_HOME` and fixture HTTP

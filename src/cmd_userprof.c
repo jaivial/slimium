@@ -14,13 +14,15 @@ static int no_args(ctx_t *c, int argc, char **argv, const char *usage) {
 static int profile_create(ctx_t *c, int argc, char **argv) {
     const char *ua = opt_val(c, &argc, argv, "--ua");
     const char *locale = opt_val(c, &argc, argv, "--locale");
+    const char *store = opt_val(c, &argc, argv, "--password-store");
     if (opt_done(c, &argc, argv)) return -1;
-    if (argc != 1) return usage_err(c, "profile create NAME [--ua X] [--locale X]");
-    if (userprof_create(argv[0], ua, locale)) return -1;
+    if (argc != 1) return usage_err(c, "profile create NAME [--ua X] [--locale X] [--password-store basic|gnome-libsecret|kwallet5|kwallet6]");
+    if (!store) store = "basic";
+    if (userprof_create(argv[0], ua, locale, store)) return -1;
     char data[4096];
     if (userprof_data_dir(argv[0], data, sizeof data)) return -1;
-    out_t(c, "created user profile %s", argv[0]);
-    out_s(c, "user", argv[0]); out_s(c, "user_data_dir", data);
+    out_t(c, "created user profile %s (password store %s)", argv[0], store);
+    out_s(c, "user", argv[0]); out_s(c, "user_data_dir", data); out_s(c, "password_store", store);
     if (ua) out_s(c, "ua", ua);
     if (locale) out_s(c, "locale", locale);
     return 0;
@@ -45,6 +47,7 @@ static int profile_list(ctx_t *c, int argc, char **argv) {
         sb_printf(&c->oj, ",\"current\":%s,\"saved_pages\":%zu", current ? "true" : "false", json_len((jv){p->pages, strlen(p->pages), J_ARR}));
         if (p->ua) { sb_puts(&c->oj, ",\"ua\":"); sb_jstrz(&c->oj, p->ua); }
         if (p->locale) { sb_puts(&c->oj, ",\"locale\":"); sb_jstrz(&c->oj, p->locale); }
+        if (p->password_store) { sb_puts(&c->oj, ",\"password_store\":"); sb_jstrz(&c->oj, p->password_store); }
         sb_putc(&c->oj, '}');
         out_t(c, "%s%s%s", i ? "\n" : "", current ? "* " : "  ", p->name);
         if (p->ua) out_t(c, "\tua=%s", p->ua);
@@ -80,13 +83,21 @@ static int profile_show(ctx_t *c, int argc, char **argv) {
     if (opt_done(c, &argc, argv)) return -1;
     if (argc != 1) return usage_err(c, "profile show NAME");
     userprof_t p;
+    char data[4096], store[32];
+    if (userprof_data_dir(argv[0], data, sizeof data) || userprof_store(argv[0], store, sizeof store)) return -1;
     if (userprof_load(argv[0], &p)) return -1;
-    char data[4096];
-    if (userprof_data_dir(argv[0], data, sizeof data)) { userprof_free(&p); return -1; }
     size_t pages = json_len((jv){p.pages, strlen(p.pages), J_ARR});
     out_t(c, "user      %s\ndata      %s\ncreated_ms %lld\nupdated_ms %lld", p.name, data, p.created_ms, p.updated_ms);
     if (p.ua) out_t(c, "\nua        %s", p.ua);
     if (p.locale) out_t(c, "\nlocale    %s", p.locale);
+    out_t(c, "\npassword_store %s", store); out_s(c, "password_store", store);
+    cookie_scan_t s;   /* only encryption prefixes are counted; no cookie name or value is read out */
+    if (userprof_cookies(argv[0], &s)) {
+        out_t(c, "\ncookies   unknown (%s)", slim_errmsg()); out_s(c, "cookies", "unknown");
+    } else {
+        out_t(c, "\ncookies   %lu v10 (basic), %lu v11 (keyring), %lu other", s.v10, s.v11, s.other);
+        sb_printf(&c->oj, ",\"cookies\":{\"v10\":%lu,\"v11\":%lu,\"other\":%lu}", s.v10, s.v11, s.other);
+    }
     out_t(c, "\nsaved     %zu page%s", pages, pages == 1 ? "" : "s");
     if (p.saved_ms) out_t(c, "\ncurrent   %d\t%s", p.current_index, p.current_url ? p.current_url : "");
     out_s(c, "user", p.name); out_s(c, "user_data_dir", data);
@@ -117,6 +128,15 @@ static int profile_delete(ctx_t *c, int argc, char **argv) {
     if (userprof_delete(argv[0])) return -1;
     out_t(c, "deleted user profile %s", argv[0]);
     out_s(c, "user", argv[0]); out_b(c, "deleted", 1);
+    return 0;
+}
+
+static int profile_password_store(ctx_t *c, int argc, char **argv) {
+    if (opt_done(c, &argc, argv)) return -1;
+    if (argc != 2) return usage_err(c, "profile password-store NAME basic|gnome-libsecret|kwallet5|kwallet6");
+    if (userprof_set_store(argv[0], argv[1])) return -1;
+    out_t(c, "user profile %s now pins password store %s", argv[0], argv[1]);
+    out_s(c, "user", argv[0]); out_s(c, "password_store", argv[1]);
     return 0;
 }
 
@@ -255,7 +275,7 @@ static int profile_restore(ctx_t *c, int argc, char **argv) {
 }
 
 static int cmd_profile(ctx_t *c, int argc, char **argv) {
-    if (argc < 1) return usage_err(c, "profile create|list|use|current|show|rename|delete|save|restore ...");
+    if (argc < 1) return usage_err(c, "profile create|list|use|current|show|rename|delete|save|restore|password-store ...");
     const char *sub = argv[0];
     argc--; argv++;
     if (!strcmp(sub, "create")) return profile_create(c, argc, argv);
@@ -267,11 +287,12 @@ static int cmd_profile(ctx_t *c, int argc, char **argv) {
     if (!strcmp(sub, "delete")) return profile_delete(c, argc, argv);
     if (!strcmp(sub, "save")) return profile_save(c, argc, argv);
     if (!strcmp(sub, "restore")) return profile_restore(c, argc, argv);
+    if (!strcmp(sub, "password-store")) return profile_password_store(c, argc, argv);
     return usage_err(c, "unknown profile subcommand '%s'", sub);
 }
 
 static const cmd_def COMMANDS[] = {
-    {"profile", cmd_profile, 0, "create|list|use|current|show|rename|delete|save|restore  named persistent login profiles"},
+    {"profile", cmd_profile, 0, "create|list|use|current|show|rename|delete|save|restore|password-store  named persistent login profiles"},
 };
 
 const cmd_def *slim_user_profile_commands(size_t *count) {

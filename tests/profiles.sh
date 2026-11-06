@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Named user-profile registry, persistence, isolation, crash, and cu-wrapper tests.
-# Uses only fresh temporary data and CDP 9450-9453; never reads or signals cu's browser.
+# Named user-profile registry, persistence, isolation, crash, cu-wrapper, and password-store
+# pinning tests. Uses only fresh temporary data and CDP 9450-9453; never reads or signals cu's
+# browser. Cookie databases are inspected only below the temporary SLIM_PROFILES_ROOT.
 set -u
 cd "$(dirname "$0")/.."
 BIN=${SLIM_BIN:-./slimium}
@@ -94,6 +95,61 @@ state_none='"cookie":null,"local":null,"idb":null'
 url_read="http://127.0.0.1:$HPORT/profile-read.html"
 url_set="http://127.0.0.1:$HPORT/profile-set.html"
 url_scroll="http://127.0.0.1:$HPORT/profile-scroll.html"
+
+# Password-store helpers. 'profile show' counts only encryption prefixes, never values.
+show_field() { # user, python expression over the 'profile show' JSON object d
+    "$BIN" --json profile show "$1" 2>>"$OUT/show.err" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1]))' "$2" 2>/dev/null
+}
+cookie_counts() { show_field "$1" '"v10=%d v11=%d" % (d["cookies"]["v10"], d["cookies"]["v11"])'; }
+sql_counts() { # Cross-check with SQLite itself (python3 stdlib, read-only immutable URI).
+    python3 -c 'import sqlite3,sys
+c=sqlite3.connect("file:%s?immutable=1" % sys.argv[1], uri=True)
+r=[bytes(v[0])[:3] for v in c.execute("select encrypted_value from cookies")]
+print("v10=%d v11=%d" % (r.count(b"v10"), r.count(b"v11")))' "$1" 2>/dev/null
+}
+craft_cookies() { # db path, comma list of fake encrypted_value prefixes (test-only fixture)
+    python3 -c 'import sqlite3,sys
+c=sqlite3.connect(sys.argv[1])
+c.execute("CREATE TABLE meta(key LONGVARCHAR NOT NULL UNIQUE PRIMARY KEY, value LONGVARCHAR)")
+c.execute("CREATE TABLE cookies(creation_utc INTEGER NOT NULL,host_key TEXT NOT NULL,top_frame_site_key TEXT NOT NULL,name TEXT NOT NULL,value TEXT NOT NULL,encrypted_value BLOB NOT NULL,path TEXT NOT NULL,expires_utc INTEGER NOT NULL,is_secure INTEGER NOT NULL,is_httponly INTEGER NOT NULL,last_access_utc INTEGER NOT NULL,has_expires INTEGER NOT NULL,is_persistent INTEGER NOT NULL,priority INTEGER NOT NULL,samesite INTEGER NOT NULL,source_scheme INTEGER NOT NULL,source_port INTEGER NOT NULL,last_update_utc INTEGER NOT NULL,source_type INTEGER NOT NULL,has_cross_site_ancestor INTEGER NOT NULL)")
+for i,p in enumerate(x for x in sys.argv[2].split(",") if x):
+    c.execute("INSERT INTO cookies VALUES(?,?,?,?,?,?,?,0,0,0,0,0,1,1,0,0,0,0,0,0)", (i,"127.0.0.1","","fixture%d"%i,"",p.encode()+bytes(32),"/"))
+c.commit()' "$1" "$2"
+}
+legacy_profile() { # name, cookie prefixes ("" = no Cookies DB): registry entry without password_store
+    mkdir -p -m 700 "$ROOT/$1" "$ROOT/$1/data" "$ROOT/$1/data/Default"
+    (umask 077; printf '{"version":1,"name":"%s","created_ms":1,"updated_ms":1}\n' "$1" >"$ROOT/$1/profile.json")
+    [ -z "$2" ] || craft_cookies "$ROOT/$1/data/Default/Cookies" "$2"
+}
+strip_store() { python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d.pop("password_store",None); open(p,"w").write(json.dumps(d))' "$ROOT/$1/profile.json"; }
+set_store_raw() { python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["password_store"]=sys.argv[2]; open(p,"w").write(json.dumps(d))' "$ROOT/$1/profile.json" "$2"; }
+cmdline_of_session() { # session -> its browser command line
+    local pid
+    pid=$("$BIN" --session "$1" --json status 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["pid"])' 2>/dev/null)
+    [ -n "$pid" ] && tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null
+}
+wrap_launch() { # user, caller args...: a cu-style daemon launch through slimium-chrome
+    local user=$1; shift
+    : >"$OUT/wrap-ps.log"
+    SLIM_USER_PROFILE=$user SLIM_WRAPPER_LOG="$OUT/wrap-ps.log" "$WRAP" --headless=new --remote-debugging-port="$PW" \
+        --user-data-dir="$TMP/cu-ps-ignored" --no-first-run "$@" about:blank >"$OUT/wrapper-browser.log" 2>&1 &
+    WPID=$!
+    printf '%s wrapper-%s\n' "$WPID" "$user" >>"$OUT/pids"
+    wait_wrapper
+}
+set_fixture_state() { # session: write cookies + localStorage + IndexedDB, wait until stored
+    local i
+    "$BIN" --session "$1" nav "$url_set" >/dev/null 2>&1 || return 1
+    for i in $(seq 1 50); do
+        if [ "$("$BIN" --session "$1" eval 'window.profileFixtureReady' 2>/dev/null)" = true ]; then
+            # Leave the read page open: the wrapper keeps Chromium's restored tabs, and stateless
+            # --port commands may pick either tab, so every restored tab must be a read page.
+            sleep 1; "$BIN" --session "$1" nav "$url_read" >/dev/null 2>&1; return $?
+        fi
+        sleep 0.1
+    done
+    return 1
+}
 
 now_ms() { echo $(( $(date +%s%N) / 1000000 )); }
 M_START=0
@@ -241,6 +297,10 @@ t_re use-alpha 'default user profile: alpha' "$BIN" profile use alpha
 t_re current-alpha '^alpha$' "$BIN" profile current
 t_re list-current '"user":"alpha","current":true' "$BIN" --json profile list
 t_re show-alpha 'ua +ProfileTests/1.0' "$BIN" profile show alpha
+t_re show-alpha-store 'password_store basic' "$BIN" profile show alpha
+ok metadata-store-default "$(cat "$ROOT/alpha/profile.json")" 'grep -q "\"password_store\":\"basic\"" "$ROOT/alpha/profile.json"'
+t_fail create-bad-store 'bad password store' "$BIN" profile create badstore --password-store gnome
+t_fail bad-store-not-created 'no user profile' "$BIN" profile show badstore
 t_fail delete-needs-yes 'requires --yes' "$BIN" profile delete beta
 ok root-mode "$(stat -c %a "$ROOT")" '[ "$(stat -c %a "$ROOT")" = 700 ]'
 ok data-mode "$(stat -c %a "$ROOT/alpha/data")" '[ "$(stat -c %a "$ROOT/alpha/data")" = 700 ]'
@@ -263,6 +323,8 @@ run_capture "$BIN" --session "$A" start --port "$P0" --no-gov
 M_START=$(( $(now_ms) - T0 ))
 if [ "$RC" = 0 ]; then pass=$((pass + 1)); else echo "FATAL default start: $(head -c 400 "$OUT/err")"; exit 1; fi
 t_re status-default-user '"user":"alpha"' "$BIN" --session "$A" --json status
+DEFAULT_CMD=$(cmdline_of_session "$A")
+ok default-start-pins-basic "$DEFAULT_CMD" 'printf "%s" "$DEFAULT_CMD" | grep -q -- "--password-store=basic"'
 PREF_OK=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("yes" if d["session"]["restore_on_startup"] == 1 and d["session"]["profile_test_nested"] == "kept" and d["profile_test_keep"]["value"] == 42 else "no")' "$ROOT/alpha/data/Default/Preferences")
 ok preferences-preserved "$PREF_OK" '[ "$PREF_OK" = yes ]'
 ok preferences-mode-after-patch "$(stat -c %a "$ROOT/alpha/data/Default/Preferences")" '[ "$(stat -c %a "$ROOT/alpha/data/Default/Preferences")" = 600 ]'
@@ -394,6 +456,157 @@ t_ok wrapper-nav-second "$BIN" --port "$PW" nav "$url_read"
 t_re wrapper-state-after-daemon-restart "$state_all" "$BIN" --port "$PW" eval 'window.profileState'
 t_re wrapper-session-after-restart '"session":"session-marker-7451"' "$BIN" --port "$PW" eval 'window.profileState'
 close_wrapper
+
+# ---- Password store pinning (the cu data-loss bug) ----
+# A Chromium launched with another --password-store than the one that encrypted a cookie cannot
+# decrypt it and deletes it. Named profiles pin the store; start and the wrapper enforce it.
+t_re ps-create 'password store basic' "$BIN" profile create psbasic
+must start_named "$B" "$P1" psbasic -- --password-store=gnome-libsecret
+pass=$((pass + 1))
+ok ps-start-caller-replaced "$(cat "$OUT/err")" 'grep -q "pins --password-store=basic; replaced caller --password-store=gnome-libsecret" "$OUT/err"'
+ok ps-start-json-store "$LAST" 'printf "%s" "$LAST" | grep -q "user psbasic"'
+PS_CMD=$(cmdline_of_session "$B")
+ok ps-start-cmdline-basic "$PS_CMD" 'printf "%s" "$PS_CMD" | grep -q -- "--password-store=basic" && ! printf "%s" "$PS_CMD" | grep -q -- "gnome-libsecret"'
+must set_fixture_state "$B"
+pass=$((pass + 1))
+must stop_session "$B"
+pass=$((pass + 1))
+PS_DB="$ROOT/psbasic/data/Default/Cookies"
+PS_COUNTS=$(cookie_counts psbasic)
+ok ps-written-v10 "$PS_COUNTS" '[ "$PS_COUNTS" = "v10=2 v11=0" ]'
+PS_SQL=$(sql_counts "$PS_DB")
+ok ps-scanner-matches-sqlite "ours=$PS_COUNTS sqlite=$PS_SQL" '[ "$PS_SQL" = "$PS_COUNTS" ]'
+# cu-style relaunches: caller basic, caller gnome-libsecret (cu's opposite), no caller value.
+for CALLER in --password-store=basic --password-store=gnome-libsecret none; do
+    if [ "$CALLER" = none ]; then must wrap_launch psbasic; else must wrap_launch psbasic "$CALLER"; fi
+    t_ok "ps-wrap-nav[$CALLER]" "$BIN" --port "$PW" nav "$url_read"
+    t_re "ps-wrap-cookies[$CALLER]" "$state_all" "$BIN" --port "$PW" eval 'window.profileState'
+    t_re "ps-wrap-session[$CALLER]" '"session":"session-marker-7451"' "$BIN" --port "$PW" eval 'window.profileState'
+    WLOG=$(cat "$OUT/wrap-ps.log")
+    ok "ps-wrap-argv[$CALLER]" "$WLOG" '[ "$(grep -o -- "password-store=[a-z0-9-]*" "$OUT/wrap-ps.log")" = "password-store=basic" ]'
+    if [ "$CALLER" = --password-store=gnome-libsecret ]; then
+        ok ps-wrap-override-logged "$(head -c 300 "$OUT/wrapper-browser.log")" 'grep -q "slimium-chrome: user profile .psbasic. pins --password-store=basic; replaced caller --password-store=gnome-libsecret" "$OUT/wrapper-browser.log"'
+    else
+        ok "ps-wrap-no-log[$CALLER]" "$(head -c 300 "$OUT/wrapper-browser.log")" '! grep -q "replaced caller" "$OUT/wrapper-browser.log"'
+    fi
+    close_wrapper
+    PS_AFTER=$(cookie_counts psbasic)
+    ok "ps-wrap-db-intact[$CALLER]" "$PS_AFTER" '[ "$PS_AFTER" = "v10=2 v11=0" ]'
+done
+
+# argv rewriting without a real engine: a fake engine records argv and that it ran.
+FAKE="$TMP/fake-chrome"
+printf '#!/bin/sh\ntouch "%s/fake-ran"\nexit 0\n' "$TMP" >"$FAKE"
+chmod 700 "$FAKE"
+SLIM_CHROMIUM="$FAKE" SLIM_USER_PROFILE=psbasic SLIM_WRAPPER_LOG="$OUT/fake.log" "$WRAP" --password-store gnome-libsecret \
+    -password-store=kwallet5 --password-store=basic --remote-debugging-port="$PW" about:blank 2>"$OUT/fake.err"
+FAKE_LOG=$(cat "$OUT/fake.log")
+ok ps-fake-one-store "$FAKE_LOG" '[ "$(grep -o -- "password-store[^ ]*" "$OUT/fake.log")" = "password-store=basic" ] && ! grep -q gnome-libsecret "$OUT/fake.log" && grep -q "about:blank" "$OUT/fake.log"'
+ok ps-fake-logs-each "$(cat "$OUT/fake.err")" '[ "$(grep -c "replaced caller" "$OUT/fake.err")" = 2 ]'
+: >"$OUT/fake.log"
+SLIM_CHROMIUM="$FAKE" SLIM_WRAPPER_LOG="$OUT/fake.log" "$WRAP" --password-store=gnome-libsecret --remote-debugging-port="$PW" about:blank 2>"$OUT/fake.err"
+FAKE_LOG=$(cat "$OUT/fake.log")
+ok ps-unnamed-unchanged "$FAKE_LOG" '[ "$(grep -o -- "password-store=[a-z0-9-]*" "$OUT/fake.log")" = "password-store=gnome-libsecret" ] && ! grep -q "user-data-dir" "$OUT/fake.log" && [ ! -s "$OUT/fake.err" ]'
+
+# Guard: a tampered pin (basic) over keyring-encrypted (v11) cookies refuses to launch.
+t_ok ps-create-guard "$BIN" profile create psguard
+craft_cookies "$ROOT/psguard/data/Default/Cookies" v10,v11,v11
+GUARD_SUM=$(sha256sum "$ROOT/psguard/data/Default/Cookies")
+t_fail ps-guard-start 'pins --password-store=basic but 2 of its cookies are encrypted with an OS keyring.*refusing to start' \
+    "$BIN" --session "$DUP" start --user psguard --port "$P2" --no-gov
+t_fail ps-guard-port-unused 'not running|no browser' "$BIN" --port "$P2" status
+rm -f "$TMP/fake-ran"
+SLIM_CHROMIUM="$FAKE" SLIM_USER_PROFILE=psguard "$WRAP" --password-store=basic about:blank 2>"$OUT/fake.err"
+GUARD_RC=$?
+ok ps-guard-wrapper "rc=$GUARD_RC $(cat "$OUT/fake.err")" '[ "$GUARD_RC" = 127 ] && grep -q "refusing to start" "$OUT/fake.err" && [ ! -e "$TMP/fake-ran" ]'
+ok ps-guard-db-untouched "$(sha256sum "$ROOT/psguard/data/Default/Cookies")" '[ "$(sha256sum "$ROOT/psguard/data/Default/Cookies")" = "$GUARD_SUM" ]'
+t_fail ps-repin-basic-refused 'refusing to pin .basic.' "$BIN" profile password-store psguard basic
+t_re ps-repin-keyring 'now pins password store gnome-libsecret' "$BIN" profile password-store psguard gnome-libsecret
+t_fail ps-repin-other-keyring 'refusing to pin .kwallet5.' "$BIN" profile password-store psguard kwallet5
+t_re ps-guard-show '"password_store":"gnome-libsecret","cookies":\{"v10":1,"v11":2,"other":0\}' "$BIN" --json profile show psguard
+# A keyring pin with v11 cookies needs a session bus; without one Chromium could not decrypt them.
+t_fail ps-guard-no-bus 'no session D-Bus' env -u DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR="$TMP/no-runtime" \
+    SLIM_CHROMIUM="$FAKE" "$BIN" --session "$DUP" start --user psguard --port "$P2" --no-gov
+t_ok ps-delete-guard "$BIN" profile delete psguard --yes
+
+# Legacy profiles (no password_store): detected from the cookie database, persisted atomically.
+legacy_profile legv10 v10,v10
+legacy_profile legv11 v10,v11
+legacy_profile legkde v11
+legacy_profile legnone ""
+legacy_profile legbad ""
+printf 'SQLite format 3\0garbage' >"$ROOT/legbad/data/Default/Cookies"
+run_capture "$BIN" --json profile show legv10
+ok ps-legacy-v10 "$LAST $(cat "$OUT/err")" 'printf "%s" "$LAST" | grep -q "\"password_store\":\"basic\"" && grep -q "pinned password store basic (detected: 2 v10, 0 v11" "$OUT/err"'
+run_capture env XDG_CURRENT_DESKTOP=GNOME "$BIN" --json profile show legv11
+ok ps-legacy-v11 "$LAST" 'printf "%s" "$LAST" | grep -q "\"password_store\":\"gnome-libsecret\""'
+run_capture env XDG_CURRENT_DESKTOP=KDE KDE_SESSION_VERSION=6 "$BIN" --json profile show legkde
+ok ps-legacy-kde "$LAST" 'printf "%s" "$LAST" | grep -q "\"password_store\":\"kwallet6\""'
+run_capture "$BIN" --json profile show legnone
+ok ps-legacy-none "$LAST" 'printf "%s" "$LAST" | grep -q "\"password_store\":\"basic\""'
+t_fail ps-legacy-corrupt 'cannot detect the password store' "$BIN" profile show legbad
+ok ps-legacy-corrupt-not-pinned "$(cat "$ROOT/legbad/profile.json")" '! grep -q password_store "$ROOT/legbad/profile.json"'
+for L in legv10 legv11 legkde legnone; do
+    ok "ps-legacy-persisted[$L]" "$(cat "$ROOT/$L/profile.json")" 'grep -q "\"password_store\":" "$ROOT/$L/profile.json" && [ "$(stat -c %a "$ROOT/$L/profile.json")" = 600 ]'
+done
+ok ps-legacy-no-tmp "$(ls "$ROOT"/leg*/)" '! ls "$ROOT"/leg*/ | grep -q "\.tmp\."'
+# Second use reads the pin (even from another desktop) instead of re-detecting.
+run_capture env XDG_CURRENT_DESKTOP=KDE "$BIN" --json profile show legv11
+ok ps-legacy-stable "$LAST $(cat "$OUT/err")" 'printf "%s" "$LAST" | grep -q "\"password_store\":\"gnome-libsecret\"" && ! grep -q detected "$OUT/err"'
+# A pinned profile with an unreadable database still opens (warning) and shows 'unknown'.
+set_store_raw legbad basic
+t_re ps-pinned-corrupt-show 'cookies +unknown' "$BIN" profile show legbad
+for L in legv10 legv11 legkde legnone legbad; do t_ok "ps-legacy-delete[$L]" "$BIN" profile delete "$L" --yes; done
+# The user's scenario on a real Chromium profile: strip the pin, then a cu-style launch with the
+# opposite caller store must detect basic from the v10 cookies and keep them.
+strip_store psbasic
+must wrap_launch psbasic --password-store=gnome-libsecret
+t_ok ps-legacy-wrap-nav "$BIN" --port "$PW" nav "$url_read"
+t_re ps-legacy-wrap-cookies "$state_all" "$BIN" --port "$PW" eval 'window.profileState'
+ok ps-legacy-wrap-detected "$(head -c 400 "$OUT/wrapper-browser.log")" 'grep -q "pinned password store basic (detected: 2 v10, 0 v11" "$OUT/wrapper-browser.log"'
+close_wrapper
+ok ps-legacy-wrap-persisted "$(cat "$ROOT/psbasic/profile.json")" 'grep -q "\"password_store\":\"basic\"" "$ROOT/psbasic/profile.json"'
+
+# A keyring-pinned profile survives cu's forced basic (only with a usable keyring here).
+t_re ps-create-ring 'password store gnome-libsecret' "$BIN" profile create psring --password-store gnome-libsecret
+must start_named "$B" "$P1" psring
+pass=$((pass + 1))
+must set_fixture_state "$B"
+pass=$((pass + 1))
+must stop_session "$B"
+pass=$((pass + 1))
+RING_COUNTS=$(cookie_counts psring)
+case "$RING_COUNTS" in
+    "v10=0 v11=0"|*" v11=0")
+        echo "== keyring checks skipped: no usable keyring here (gnome-libsecret launch wrote $RING_COUNTS)" ;;
+    *)
+        ok ps-ring-v11 "$RING_COUNTS" '[ "$RING_COUNTS" = "v10=0 v11=2" ]'
+        for ROUND in pinned legacy; do
+            # 'legacy': the exact field failure (profile created without the pin, cu passes basic).
+            [ "$ROUND" = legacy ] && strip_store psring
+            must wrap_launch psring --password-store=basic
+            t_ok "ps-ring-nav[$ROUND]" "$BIN" --port "$PW" nav "$url_read"
+            t_re "ps-ring-cookies[$ROUND]" "$state_all" "$BIN" --port "$PW" eval 'window.profileState'
+            t_re "ps-ring-session[$ROUND]" '"session":"session-marker-7451"' "$BIN" --port "$PW" eval 'window.profileState'
+            ok "ps-ring-replaced[$ROUND]" "$(head -c 300 "$OUT/wrapper-browser.log")" 'grep -q "pins --password-store=gnome-libsecret; replaced caller --password-store=basic" "$OUT/wrapper-browser.log"'
+            close_wrapper
+            RING_AFTER=$(cookie_counts psring)
+            ok "ps-ring-db-intact[$ROUND]" "$RING_AFTER" '[ "$RING_AFTER" = "v10=0 v11=2" ]'
+        done
+        set_store_raw psring basic
+        RING_SUM=$(sha256sum "$ROOT/psring/data/Default/Cookies")
+        t_fail ps-ring-tampered-start 'refusing to start' "$BIN" --session "$B" start --user psring --port "$P1" --no-gov
+        ok ps-ring-tampered-untouched "$RING_SUM" '[ "$(sha256sum "$ROOT/psring/data/Default/Cookies")" = "$RING_SUM" ]'
+        t_ok ps-ring-repin "$BIN" profile password-store psring gnome-libsecret
+        must start_named "$B" "$P1" psring
+        pass=$((pass + 1))
+        t_ok ps-ring-final-nav "$BIN" --session "$B" nav "$url_read"
+        t_re ps-ring-final-cookies "$state_all" "$BIN" --session "$B" eval 'window.profileState'
+        must stop_session "$B"
+        pass=$((pass + 1)) ;;
+esac
+t_ok ps-delete-ring "$BIN" profile delete psring --yes
+t_ok ps-delete-basic "$BIN" profile delete psbasic --yes
 
 
 # Real cu 1.9.0 daemon restart, explicitly managed (cu-slim has no stop/start lifecycle).

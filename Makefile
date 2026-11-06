@@ -16,7 +16,7 @@ ifeq ($(wildcard src/mem.c),)
 SRCS += src/mem_stub.c
 endif
 OBJS := $(SRCS:src/%.c=$(BUILD)/%.o)
-LIBSRCS := src/util.c src/json.c src/b64.c src/ws.c
+LIBSRCS := src/util.c src/json.c src/b64.c src/ws.c src/cookiedb.c
 HDRS := $(wildcard src/*.h)
 
 .PHONY: all test test-modules test-cu test-asan test-gov unit clean install uninstall asan bench size

@@ -79,7 +79,7 @@ static void unlock_registry(int fd) {
 }
 
 void userprof_free(userprof_t *p) {
-    free(p->name); free(p->ua); free(p->locale); free(p->pages); free(p->current_url);
+    free(p->name); free(p->ua); free(p->locale); free(p->password_store); free(p->pages); free(p->current_url);
     memset(p, 0, sizeof *p);
 }
 
@@ -104,6 +104,7 @@ static int load_at(const char *root, const char *name, userprof_t *p) {
     p->name = xstrdup(name);
     p->ua = json_get_str(d, "ua");
     p->locale = json_get_str(d, "locale");
+    p->password_store = json_get_str(d, "password_store");
     p->created_ms = (long long)json_get_num(d, "created_ms", 0);
     p->updated_ms = (long long)json_get_num(d, "updated_ms", 0);
     p->saved_ms = (long long)json_get_num(d, "saved_ms", 0);
@@ -162,6 +163,7 @@ static int write_meta_at(const char *root, const userprof_t *p) {
     sb_printf(&b, ",\"created_ms\":%lld,\"updated_ms\":%lld", p->created_ms, p->updated_ms);
     if (p->ua && *p->ua) { sb_puts(&b, ",\"ua\":"); sb_jstrz(&b, p->ua); }
     if (p->locale && *p->locale) { sb_puts(&b, ",\"locale\":"); sb_jstrz(&b, p->locale); }
+    if (p->password_store) { sb_puts(&b, ",\"password_store\":"); sb_jstrz(&b, p->password_store); }
     if (p->saved_ms) {
         sb_printf(&b, ",\"saved_ms\":%lld,\"current_index\":%d,\"current_url\":", p->saved_ms, p->current_index);
         sb_jstrz(&b, p->current_url);
@@ -173,7 +175,9 @@ static int write_meta_at(const char *root, const userprof_t *p) {
     return r;
 }
 
-int userprof_create(const char *name, const char *ua, const char *locale) {
+int userprof_create(const char *name, const char *ua, const char *locale, const char *store) {
+    if (!store) store = "basic";
+    if (!userprof_valid_store(store)) return slim_seterr("bad password store '%s' (basic|gnome-libsecret|kwallet5|kwallet6)", store);
     if (!userprof_valid_name(name)) return slim_seterr("invalid user profile name '%s' (use 1-64 ASCII letters, digits, ._-; no leading dot)", name ? name : "");
     if ((ua && strlen(ua) > 2048) || (locale && strlen(locale) > 128)) return slim_seterr("user agent or locale is too long");
     char root[PATH_MAX];
@@ -187,7 +191,7 @@ int userprof_create(const char *name, const char *ua, const char *locale) {
         return e == EEXIST ? slim_seterr("user profile '%s' already exists", name) : slim_seterr("create user profile '%s': %s", name, strerror(e));
     }
     userprof_t p; memset(&p, 0, sizeof p);
-    p.name = (char *)name; p.ua = (char *)ua; p.locale = (char *)locale;
+    p.name = (char *)name; p.ua = (char *)ua; p.locale = (char *)locale; p.password_store = (char *)store;
     p.created_ms = p.updated_ms = wall_ms(); p.pages = "[]";
     int r = mkdir(data, 0700) || write_meta_at(root, &p);
     if (r) { rmdir(data); rmdir(dir); }
@@ -494,6 +498,114 @@ int userprof_data_dir(const char *name, char *buf, size_t cap) {
     int n = snprintf(buf, cap, "%s", resolved);
     if (n < 0 || (size_t)n >= cap) return slim_seterr("user profile data path too long");
     return enable_session_restore(buf);
+}
+
+/* ---- password store pinning ---- */
+int userprof_valid_store(const char *s) {
+    static const char *const stores[] = {"basic", "gnome-libsecret", "kwallet5", "kwallet6", NULL};
+    for (int i = 0; s && stores[i]; i++) if (!strcmp(s, stores[i])) return 1;
+    return 0;
+}
+
+static int cookies_at(const char *root, const char *name, cookie_scan_t *s) {
+    static const char *const rel[] = {"data/Default/Cookies", "data/Default/Network/Cookies"};
+    memset(s, 0, sizeof *s);
+    char path[PATH_MAX];
+    for (int i = 0; i < 2; i++) if (path3(path, sizeof path, root, name, rel[i]) || cookiedb_scan(path, s)) return -1;
+    return 0;
+}
+
+int userprof_cookies(const char *name, cookie_scan_t *s) {
+    char root[PATH_MAX];
+    if (!userprof_valid_name(name)) return slim_seterr("invalid user profile name '%s'", name ? name : "");
+    if (root_path(root, sizeof root, 1)) return -1;
+    return cookies_at(root, name, s);
+}
+
+/* What Chromium itself picks without --password-store when a keyring is in use. */
+static const char *keyring_store(void) {
+    const char *de = getenv("XDG_CURRENT_DESKTOP"), *v = getenv("KDE_SESSION_VERSION");
+    if (de && strstr(de, "KDE")) return v && !strcmp(v, "6") ? "kwallet6" : "kwallet5";
+    return "gnome-libsecret";
+}
+
+int userprof_store(const char *name, char *store, size_t cap) {
+    char root[PATH_MAX];
+    if (root_path(root, sizeof root, 1)) return -1;
+    int lock;
+    if (lock_registry(root, 1, &lock)) return -1;
+    userprof_t p;
+    int r = load_at(root, name, &p);
+    if (!r && p.password_store && !userprof_valid_store(p.password_store))
+        r = slim_seterr("user profile '%s' has an invalid password_store '%.40s' in profile.json", name, p.password_store);
+    if (!r && !p.password_store) {
+        cookie_scan_t s;
+        if (cookies_at(root, name, &s)) {
+            char why[256]; snprintf(why, sizeof why, "%s", slim_errmsg());
+            r = slim_seterr("cannot detect the password store of user profile '%s' (%s); pin it with 'slimium profile password-store %s STORE'", name, why, name);
+        } else {
+            p.password_store = xstrdup(s.v11 ? keyring_store() : "basic");
+            p.updated_ms = wall_ms();
+            r = write_meta_at(root, &p);
+            if (!r) fprintf(stderr, "slimium: user profile '%s' pinned password store %s (detected: %lu v10, %lu v11 cookies)\n",
+                            name, p.password_store, s.v10, s.v11);
+        }
+    }
+    if (!r && snprintf(store, cap, "%s", p.password_store) >= (int)cap) r = slim_seterr("password store name too long");
+    userprof_free(&p); unlock_registry(lock);
+    return r;
+}
+
+static int session_bus(void) {
+    const char *a = getenv("DBUS_SESSION_BUS_ADDRESS"), *x = getenv("XDG_RUNTIME_DIR");
+    if (a && *a) return 1;
+    char p[PATH_MAX]; struct stat st;
+    int n = x && *x == '/' ? snprintf(p, sizeof p, "%s/bus", x) : -1;
+    return n > 0 && (size_t)n < sizeof p && !stat(p, &st) && S_ISSOCK(st.st_mode);
+}
+
+int userprof_launch_store(const char *name, char *store, size_t cap) {
+    if (userprof_store(name, store, cap)) return -1;
+    cookie_scan_t s;
+    if (userprof_cookies(name, &s)) {
+        /* The pin already keeps every slimium launch consistent; this check is the backstop. */
+        fprintf(stderr, "slimium: warning: cannot verify cookie encryption of user profile '%s': %s\n", name, slim_errmsg());
+        return 0;
+    }
+    if (!strcmp(store, "basic") && s.v11)
+        return slim_seterr("user profile '%s' pins --password-store=basic but %lu of its cookies are encrypted with an OS keyring (v11); "
+                           "refusing to start: Chromium would delete them. If the profile belongs to the keyring, run "
+                           "'slimium profile password-store %s %s'", name, s.v11, name, keyring_store());
+    if (strcmp(store, "basic") && s.v11 && !session_bus())
+        return slim_seterr("user profile '%s' pins --password-store=%s and has %lu keyring-encrypted (v11) cookies, but no session "
+                           "D-Bus is reachable (DBUS_SESSION_BUS_ADDRESS); refusing to start: Chromium would delete them", name, store, s.v11);
+    return 0;
+}
+
+int userprof_set_store(const char *name, const char *store) {
+    if (!userprof_valid_store(store)) return slim_seterr("bad password store '%s' (basic|gnome-libsecret|kwallet5|kwallet6)", store ? store : "");
+    char root[PATH_MAX];
+    if (root_path(root, sizeof root, 1)) return -1;
+    int lock;
+    if (lock_registry(root, 1, &lock)) return -1;
+    userprof_t p;
+    cookie_scan_t s;
+    char data[PATH_MAX];
+    int r = load_at(root, name, &p);
+    if (!r) r = path3(data, sizeof data, root, name, "data");
+    if (!r && proc_uses_dir(data)) r = slim_seterr("cannot change the password store of active user profile '%s'", name);
+    if (!r) r = cookies_at(root, name, &s);
+    /* v11 cookies are readable only with the keyring that wrote them (and never with basic). */
+    if (!r && s.v11 && (!strcmp(store, "basic") ||
+                        (p.password_store && strcmp(p.password_store, "basic") && strcmp(p.password_store, store))))
+        r = slim_seterr("refusing to pin '%s' on user profile '%s': %lu cookies are encrypted with %s (v11) and Chromium would delete them",
+                        store, name, s.v11, p.password_store && strcmp(p.password_store, "basic") ? p.password_store : "an OS keyring");
+    if (!r) {
+        free(p.password_store); p.password_store = xstrdup(store); p.updated_ms = wall_ms();
+        r = write_meta_at(root, &p);
+    }
+    userprof_free(&p); unlock_registry(lock);
+    return r;
 }
 
 int userprof_save_pages(const char *name, const char *pages_json, int current_index, const char *current_url) {

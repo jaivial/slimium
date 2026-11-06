@@ -89,6 +89,19 @@ static void log_argv(char **av) {
     sb_free(&b);
 }
 
+/* Named profiles pin Chromium's --password-store (cookie encryption key): a caller's
+ * --password-store[=]X (either dash form) is consumed here and replaced by the pinned value,
+ * like --user-data-dir. Logs (stderr) a caller value that differed; 1 = argv[*i] consumed. */
+static int caller_store(char **argv, int argc, int *i, const char *prog, const char *user, const char *store) {
+    const char *a = argv[*i], *n = a + (a[1] == '-' ? 2 : 1), *v = "";
+    if (a[0] != '-' || strncmp(n, "password-store", 14) || (n[14] && n[14] != '=')) return 0;
+    if (n[14]) v = n + 15;
+    else if (*i + 1 < argc && argv[*i + 1][0] && argv[*i + 1][0] != '-' && !argv[*i + 1][strcspn(argv[*i + 1], "/:.")]) v = argv[++*i];
+    if (strcmp(v, store))
+        fprintf(stderr, "%s: user profile '%s' pins --password-store=%s; replaced caller --password-store=%.40s\n", prog, user, store, v);
+    return 1;
+}
+
 int wrapper_main(int argc, char **argv) {
     int ver = 0;
     for (int i = 1; i < argc; i++)
@@ -100,22 +113,26 @@ int wrapper_main(int argc, char **argv) {
     if (gov) { char *pe = slim_engine_private(engine); if (pe) { free(engine); engine = pe; slim_engine_libs(engine); } }
     int wargc = argc;
     char **wargv = argv;
-    char user_dir[PATH_MAX], user_arg[PATH_MAX + 20];
+    char user_dir[PATH_MAX], user_arg[PATH_MAX + 20], store[32], store_arg[64];
     const char *user = getenv("SLIM_USER_PROFILE");
     if (!ver && user && *user) {
-        if (userprof_data_dir(user, user_dir, sizeof user_dir) || userprof_check_idle(user)) {
+        if (userprof_data_dir(user, user_dir, sizeof user_dir) || userprof_check_idle(user) ||
+            userprof_launch_store(user, store, sizeof store)) {
             fprintf(stderr, "slimium-chrome: %s\n", slim_errmsg()); return 127;
         }
         snprintf(user_arg, sizeof user_arg, "--user-data-dir=%s", user_dir);
-        wargv = xmalloc(sizeof *wargv * (size_t)(argc + 2));
+        snprintf(store_arg, sizeof store_arg, "--password-store=%s", store);
+        wargv = xmalloc(sizeof *wargv * (size_t)(argc + 3));
         wargv[0] = argv[0];
         int k = 1;
         for (int i = 1; i < argc; i++) {
             if (!strcmp(argv[i], "--user-data-dir")) { if (i + 1 < argc) i++; continue; }
             if (!strncmp(argv[i], "--user-data-dir=", 16)) continue;
+            if (caller_store(argv, argc, &i, "slimium-chrome", user, store)) continue;
             wargv[k++] = argv[i];
         }
         wargv[k++] = user_arg;
+        wargv[k++] = store_arg;
         wargv[k] = NULL;
         wargc = k;
     }
@@ -321,6 +338,11 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
     if (!realpath(ud.p, rud)) snprintf(rud, sizeof rud, "%s", ud.p);
     sb_free(&ud);
     if (user && userprof_check_idle(user)) { free(engine); return -1; }
+    char store[32] = "", a_store[64];
+    if (user) {
+        if (userprof_launch_store(user, store, sizeof store)) { free(engine); return -1; }
+        snprintf(a_store, sizeof a_store, "--password-store=%s", store);
+    }
 
     int keep_session_tabs = 0;
     for (int i = 0; i < argc; i++)
@@ -357,7 +379,11 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
     args[n++] = "--no-default-browser-check";
     if (have_ua) args[n++] = ua_arg;
     if (have_lang) args[n++] = lang_arg;
-    for (int i = 0; i < argc; i++) args[n++] = argv[i];
+    if (user) args[n++] = a_store;
+    for (int i = 0; i < argc; i++) {
+        if (user && caller_store(argv, argc, &i, "slimium", user, store)) continue;
+        args[n++] = argv[i];
+    }
     args[n++] = "about:blank";
     args[n] = NULL;
     char **av = slim_profile_merge_argv(level, engine, n, args);
@@ -427,7 +453,7 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
     out_i(c, "governor", gpid > 0 ? gpid : 0);
     out_s(c, "session", s.name); out_i(c, "pid", s.pid); out_i(c, "port", port);
     out_s(c, "ws", s.ws); out_s(c, "profile", prof);
-    if (user) out_s(c, "user", user);
+    if (user) { out_s(c, "user", user); out_s(c, "password_store", store); }
     out_s(c, "user_data_dir", rud);
     out_b(c, "headless", !headful); out_s(c, "engine", engine); out_s(c, "log", logp);
     state_free(&s);
