@@ -684,10 +684,9 @@ int hold_main(ctx_t *c, int argc, char **argv) {
     while (!h_stop) {
         int avail = h->cdp.head || h->cdp.w.rpos < h->cdp.w.rlen;
         struct pollfd fds[2] = {{h->cdp.w.fd, POLLIN, 0}, {pf[0], POLLIN, 0}};
-        if (!avail) {
-            int to = h->want_ack ? 50 : 15000;
-            if (poll(fds, 2, to) < 0 && errno != EINTR) break;
-        }
+        /* always poll (without waiting while messages are buffered): a busy event stream
+         * (Network enabled on a heavy page) must not starve the notifications */
+        if (poll(fds, 2, avail ? 0 : h->want_ack ? 50 : 15000) < 0 && errno != EINTR) break;
         if (fds[1].revents & POLLIN) { char b[64]; while (read(pf[0], b, sizeof b) > 0) {} if (!h_stop) on_signal(h); }
         if (avail || (fds[0].revents & (POLLIN | POLLHUP | POLLERR))) {
             char *m; size_t n;
