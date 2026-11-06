@@ -98,9 +98,15 @@ int cmd_viewport(ctx_t *c, int argc, char **argv) {
         out_t(c, "viewport reset");
         return 0;
     }
-    long w, h; double scale = 0;
-    if (argc != 2 || parse_int(argv[0], &w) || parse_int(argv[1], &h) || w < 1 || h < 1 || w > 10000000 || h > 10000000)
-        return usage_err(c, "viewport W H [--scale F] [--mobile] | viewport reset");
+    long w = 0, h = 0; double scale = 0;
+    if (argc == 1 && (!strcmp(argv[0], "mobile") || !strcmp(argv[0], "tablet") || !strcmp(argv[0], "desktop"))) {
+        if (!strcmp(argv[0], "mobile")) { w = 375; h = 812; }
+        else if (!strcmp(argv[0], "tablet")) { w = 768; h = 1024; }
+        else { w = 1440; h = 900; }
+        /* Named presets are exact CSS-pixel sizes; --mobile remains opt-in. */
+    } else if (argc != 2 || parse_int(argv[0], &w) || parse_int(argv[1], &h) || w < 1 || h < 1 || w > 10000000 || h > 10000000) {
+        return usage_err(c, "viewport W H [--scale F] [--mobile] | viewport mobile|tablet|desktop | viewport reset");
+    }
     if (sc && (parse_double(sc, &scale) || scale <= 0 || scale > 10)) return usage_err(c, "bad --scale '%s'", sc);
     if (ctx_page(c)) return -1;
     char p[160];

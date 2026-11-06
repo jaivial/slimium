@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Media animation fixture</title>
+<style>
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101728;color:white;font:20px sans-serif}
+  #label{position:absolute;left:12px;top:10px;padding:8px;background:#0008;z-index:2}
+  #break{position:absolute;right:12px;top:10px;padding:8px;background:#0008;z-index:2}
+  canvas{display:block;width:100vw;height:100vh}
+  @media(max-width:600px){#break:after{content:"mobile"} }
+  @media(min-width:601px) and (max-width:1100px){#break:after{content:"tablet"} }
+  @media(min-width:1101px){#break:after{content:"desktop"} }
+</style>
+<div id="label">frame <span id="n">0</span></div><div id="break"></div>
+<canvas id="c"></canvas>
+<script>
+const c=document.getElementById('c'),x=c.getContext('2d'),n=document.getElementById('n');
+let frame=0,last=0;
+function draw(t){
+  if(t-last>70){
+    frame++;last=t;n.textContent=frame;window.mediaFrame=frame;
+    const w=innerWidth,h=innerHeight,d=devicePixelRatio||1;
+    c.width=Math.round(w*d);c.height=Math.round(h*d);x.setTransform(d,0,0,d,0,0);
+    x.fillStyle='hsl('+(frame*17%360)+' 70% 35%)';x.fillRect(0,0,w,h);
+    x.fillStyle='hsl('+(frame*43%360)+' 90% 60%)';
+    const bw=Math.max(20,w/5),bh=Math.max(20,h/5);
+    x.fillRect((frame*29)%Math.max(1,w-bw),(frame*17)%Math.max(1,h-bh),bw,bh);
+    x.fillStyle='white';x.font='bold 32px sans-serif';x.fillText('tick '+frame,20,Math.max(60,h-30));
+  }
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+</script>
