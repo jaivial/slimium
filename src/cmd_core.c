@@ -311,6 +311,24 @@ int ctx_page(ctx_t *c) {
     c->tid = want;
     if (!c->tab) ctx_set_target(c, want);
     if (apply_emulation(c)) return -1;
+    if (c->hold_pid && c->st.udd) {   /* tab hibernated by the governor: bring it back (see gov.c) */
+        char p[4096], *h; size_t n;
+        snprintf(p, sizeof p, "%s/.slimium-hibernated", c->st.udd);
+        if (read_file(p, &h, &n, 1 << 20) == 0) {
+            size_t tl = strlen(c->tid);
+            for (char *l = h; l && *l; l = strchr(l, '\n') ? strchr(l, '\n') + 1 : NULL) {
+                if (strncmp(l, c->tid, tl) || l[tl] != ' ') continue;
+                char q[64]; snprintf(q, sizeof q, "{\"entryId\":%lld}", atoll(l + tl + 1));
+                if (ctx_enable(c, "Page") == 0) {
+                    cdp_flush(&c->cdp, c->sid, "Page.loadEventFired");
+                    if (cdp_call(&c->cdp, c->sid, "Page.navigateToHistoryEntry", q, 5000, NULL, NULL) == 0)
+                        ctx_wait_load(c, "Page.loadEventFired", c->timeout < 10000 ? c->timeout : 10000);
+                }
+                break;
+            }
+            free(h);
+        }
+    }
     char d[320];
     if (c->hold_pid && !c->allow_dialog && hold_pending(c->session, c->tid, d, sizeof d)) return slim_seterr("%s", d);
     return 0;

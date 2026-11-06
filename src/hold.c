@@ -670,6 +670,12 @@ int hold_main(ctx_t *c, int argc, char **argv) {
     int rc = 0;
     if (hold_connect(h)) { rc = slim_seterr("keeper: %s", slim_errmsg()); goto out; }
     h_write(h);
+    char mk[PATH_MAX] = "";
+    if (h->st.udd && !h->st.attached) {   /* tells the governor that "attached" is the keeper */
+        snprintf(mk, sizeof mk, "%s/.slimium-keeper", h->st.udd);
+        char b[64]; int n = snprintf(b, sizeof b, "%d %llu\n", (int)getpid(), h->start);
+        write_file(mk, b, (size_t)n, 1);
+    }
     long long next_check = now_ms() + 15000;
     while (!h_stop) {
         int avail = h->cdp.head || h->cdp.w.rpos < h->cdp.w.rlen;
@@ -698,6 +704,7 @@ int hold_main(ctx_t *c, int argc, char **argv) {
             next_check = now_ms() + 15000;
         }
     }
+    if (mk[0]) unlink(mk);
 out:
     if (hold_owner(h->session, NULL) == getpid() && hpath(h->session, ".hold", p) == 0) unlink(p);
     for (int i = 0; i < h->npg; i++) h->pg[i].dlg = 0;
