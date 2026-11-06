@@ -140,7 +140,7 @@ static int member(jv obj, const char *name, jtype type, jv *out) {
     return 0;
 }
 static int validate_args(const tool_def *t, jv args) {
-    if (args.t == J_NONE || args.t == J_NULL) return 0;
+    if (args.t == J_NONE || args.t == J_NULL) { args.p = "{}"; args.n = 2; args.t = J_OBJ; }
     if (args.t != J_OBJ) return slim_seterr("tool arguments must be an object");
     size_t pos = 0; jv key, val;
     while (json_next(args, &pos, &key, &val)) {
@@ -605,13 +605,13 @@ static void handle_document(server_t *s, jv doc) {
             send_error(s, NULL, 0, -32600, "id must be a string, number, or null"); return;
         }
     }
-    notification = !has_id;
     if (!json_get(doc, "jsonrpc", &method) || !json_str_eq(method, "2.0")) {
-        send_error(s, has_id ? &id : NULL, notification, -32600, "jsonrpc must be \"2.0\""); return;
+        send_error(s, has_id ? &id : NULL, 0, -32600, "jsonrpc must be \"2.0\""); return;
     }
     if (!json_get(doc, "method", &method) || method.t != J_STR) {
-        send_error(s, has_id ? &id : NULL, notification, -32600, "method must be a string"); return;
+        send_error(s, has_id ? &id : NULL, 0, -32600, "method must be a string"); return;
     }
+    notification = !has_id;
     char *name = json_str(method);
     json_get(doc, "params", &params);
 
@@ -684,7 +684,10 @@ static int read_message(char **msg, size_t *len) {
     }
     if (n >= 15 && !strncasecmp(line, "Content-Length:", 15)) {
         char *end = NULL; errno = 0;
-        unsigned long long want = strtoull(line + 15, &end, 10);
+        const char *number = line + 15;
+        while (*number == ' ' || *number == '\t') number++;
+        if (*number == '-') { free(line); return 1; }
+        unsigned long long want = strtoull(number, &end, 10);
         while (end && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')) end++;
         if (errno || !end || *end) { free(line); return 1; }
         while ((n = getline(&line, &cap, stdin)) >= 0 && !blank_line(line, (size_t)n)) { /* skip other headers */ }

@@ -134,7 +134,7 @@ state/profile, and only CDP 9530 by default (override `SLIM_MCP_TEST_PORT` withi
 9530-9549 assignment). It checks initialize/list, both protocol versions, both framings, ids,
 malformed requests, notifications, cancellation, closed schemas, recursion/stdout guards, real
 browser lifecycle/navigation/input/eval/CDP/batch, current-tab behavior, screenshots and logs,
-clean EOF, and the workloads below. Current result: **322 checks, 0 failures**.
+clean EOF, and the workloads below. Current result: **325 checks, 0 failures**.
 
 Representative 2026-11-06 run on Chromium 156, 90 eval + 5 text + 5 click operations (100 total;
 identical workload in each mode):
