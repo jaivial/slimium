@@ -1,6 +1,7 @@
 /* Session lifecycle (start/stop/status/attach/sessions) and the slimium-chrome wrapper. */
 #include "cmd.h"
 #include "gov.h"
+#include "hold.h"
 #include "mem.h"
 #include "profile.h"
 #include "userprof.h"
@@ -172,6 +173,10 @@ static int port_free(int port) {
     if (fd < 0) return 0;
     struct sockaddr_in a; memset(&a, 0, sizeof a);
     a.sin_family = AF_INET; a.sin_port = htons((uint16_t)port); a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    /* like Chromium's own listener: TIME_WAIT left by a connection the browser closed first (e.g.
+     * the keeper's, when the browser was killed) does not make the port busy, a listener does */
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
     int ok = bind(fd, (struct sockaddr *)&a, sizeof a) == 0;
     close(fd);
     return ok;
@@ -281,8 +286,10 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
             return slim_seterr("session '%s' already running (pid %d, port %d)", c->session, pid, port);
         }
         state_free(&old);
+        hold_stop(c->session);
         state_remove(c->session);
     }
+    hold_cleanup(c->session);
 
     int port = c->port;
     if (port) {
@@ -411,8 +418,11 @@ int cmd_start(ctx_t *c, int argc, char **argv) {
     int r = state_save(&s);
     if (r) { kill(-pid, SIGTERM); state_free(&s); return -1; }
     pid_t gpid = gov_on ? slim_gov_spawn(pid, port, rud, 0) : 0;
+    int kpid = hold_spawn(c->session, 3000);
     out_t(c, "started session %s: pid %d port %d profile %s%s", s.name, s.pid, port, prof, headful ? " (headful)" : "");
     if (gpid > 0) out_t(c, ", governor pid %d", (int)gpid);
+    if (kpid > 0) out_t(c, ", keeper pid %d", kpid);
+    out_i(c, "keeper", kpid);
     if (user) out_t(c, " user %s", user);
     out_i(c, "governor", gpid > 0 ? gpid : 0);
     out_s(c, "session", s.name); out_i(c, "pid", s.pid); out_i(c, "port", port);
@@ -430,8 +440,11 @@ int cmd_stop(ctx_t *c, int argc, char **argv) {
     if (c->port) return usage_err(c, "stop works on sessions (--session), not --port");
     slim_state s;
     if (state_load(c->session, &s)) return -1;
+    int kept = hold_stop(c->session);
     if (s.attached) {
         state_remove(c->session);
+        hold_cleanup(c->session);
+        out_b(c, "keeper_stopped", kept);
         out_t(c, "detached session %s (browser on port %d left running)", c->session, s.port);
         out_s(c, "session", c->session); out_b(c, "detached", 1);
         state_free(&s);
@@ -462,6 +475,8 @@ int cmd_stop(ctx_t *c, int argc, char **argv) {
         }
     }
     state_remove(c->session);
+    hold_cleanup(c->session);
+    out_b(c, "keeper_stopped", kept);
     static const char *const hw[] = {"was not running", "closed", "terminated", "killed"};
     out_t(c, "stopped session %s (%s)", c->session, hw[how]);
     out_s(c, "session", c->session); out_s(c, "result", hw[how]);
@@ -502,6 +517,9 @@ int cmd_status(ctx_t *c, int argc, char **argv) {
     if (product) { out_t(c, "browser  %s\n", product); out_s(c, "browser", product); }
     if (prof) { out_t(c, "profile  %s\n", prof); out_s(c, "profile", prof); }
     if (c->have_st) {
+        int kg = -1, kp = hold_owner(c->session, &kg);
+        out_t(c, "keeper   %d\n", kp); out_i(c, "keeper", kp);
+        if (kp) { out_t(c, "emu_gen  %d/%d\n", kg, c->st.gen); out_i(c, "keeper_gen", kg); }
         out_b(c, "attached", c->st.attached);
         if (c->st.attached) out_t(c, "attached yes\n");
         if (c->st.target) { out_t(c, "tab      %s\n", c->st.target); out_s(c, "tab", c->st.target); }
@@ -540,9 +558,14 @@ int cmd_attach(ctx_t *c, int argc, char **argv) {
     s.port = c->port; s.attached = 1; s.headless = 0;
     s.pid = find_browser_pid(c->port);
     s.ws = url;
+    hold_stop(c->session);
+    hold_cleanup(c->session);
     int r = state_save(&s);
+    int kpid = r ? 0 : hold_spawn(c->session, 3000);
     if (!r) {
         out_t(c, "attached session %s to port %d (pid %d)%s%s", s.name, s.port, s.pid, product ? ", " : "", product ? product : "");
+        if (kpid > 0) out_t(c, ", keeper pid %d", kpid);
+        out_i(c, "keeper", kpid);
         out_s(c, "session", s.name); out_i(c, "port", s.port); out_i(c, "pid", s.pid); out_s(c, "ws", url);
         if (product) out_s(c, "browser", product);
     }

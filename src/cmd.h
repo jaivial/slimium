@@ -20,6 +20,9 @@ typedef struct ctx {
     cdp_t cdp; int connected;
     char *tid, *sid;   /* current target + flatten session */
     int page_on, net_on, rt_on;
+    /* emulation keeper: validated pid (0 none), hold_none: none available for this process;
+     * bu_accept: accept beforeunload in this session (no keeper); allow_dialog: skip pending check */
+    int hold_pid, hold_none, bu_accept, allow_dialog;
     /* output of the current command */
     sbuf oj, ot;
     int usage;
@@ -71,6 +74,13 @@ void js_el(sbuf *b, const char *sel, const char *body); /* (function(){...e=find
 void js_find(sbuf *b, const char *sel, const char *body); /* same, e may be null */
 void js_str(sbuf *b, const char *s);
 int ctx_attach(ctx_t *c, const char *tid); /* attach + make current tab */
+int ctx_state_reload(ctx_t *c);  /* re-read the session state (before changing it) */
+/* After changing c->st emulation fields: bump+save the generation, let the keeper apply it (or
+ * apply in this session without one). */
+int emu_commit(ctx_t *c);
+int emu_apply_sync(ctx_t *c, int full);
+/* With touch emulation on, click as a touch tap: 0 tapped, 1 not in touch mode, -1 error. */
+int ctx_tap(ctx_t *c, double x, double y, int taps);
 
 /* commands */
 int cmd_start(ctx_t *, int, char **);

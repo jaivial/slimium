@@ -49,7 +49,7 @@ static const cmd_def CMDS[] = {
     {"cookie-set", cmd_cookie_set, 0, "NAME VALUE [--domain D] [--path P] [--url U] [--secure] [--httponly]"},
     {"cookies-clear", cmd_cookies_clear, 0, "delete all cookies"},
     {"storage-clear", cmd_storage_clear, 0, "clear storage of the current origin"},
-    {"viewport", cmd_viewport, 0, "W H [--scale F] [--mobile] | reset"},
+    {"viewport", cmd_viewport, 0, "W H [--scale F] [--mobile] [--touch|--no-touch] [--orientation portrait|landscape|auto] | mobile|tablet|desktop | reset  (kept across reloads, navigations, new tabs)"},
     {"ua", cmd_ua, 0, "STRING | --reset  user agent override"},
     {"offline", cmd_offline, 0, "on|off"},
     {"block", cmd_block, 0, "[URLPATTERN...]  block URLs (none = unblock)"},

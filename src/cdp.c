@@ -115,6 +115,27 @@ static int detached_check(jv doc, const char *sid) {
     return 0;
 }
 
+/* deadline for one receive: the hook runs at least every 100 ms */
+static long long hook_dl(cdp_t *c, long long dl, int *err) {
+    *err = 0;
+    if (!c->hook) return dl;
+    long long t = now_ms();
+    if (t >= c->hook_next) { c->hook_next = t + 100; if (c->hook(c->hook_ud)) { *err = 1; return dl; } }
+    return c->hook_next < dl ? c->hook_next : dl;
+}
+
+int cdp_next(cdp_t *c, int timeout_ms, char **msg, size_t *len) {
+    if (c->head) {
+        cdp_ev *e = c->head;
+        c->head = e->next; if (!c->head) c->tail = NULL;
+        c->nev--; c->evbytes -= e->len;
+        *msg = e->msg; *len = e->len; free(e);
+        return 1;
+    }
+    jv doc;
+    return recv_msg(c, now_ms() + timeout_ms, msg, len, &doc);
+}
+
 /* a response that arrived while waiting for another id was queued: take it */
 static int take_id(cdp_t *c, long id, char **msg, size_t *len) {
     cdp_ev *prev = NULL;
@@ -137,7 +158,12 @@ int cdp_wait(cdp_t *c, long id, const char *sid, int timeout_ms, char **resp, jv
         char *msg; size_t len; jv doc, idv;
         int r = take_id(c, id, &msg, &len);
         if (r) json_parse(msg, len, &doc);
-        else r = recv_msg(c, dl, &msg, &len, &doc);
+        else {
+            int herr; long long rdl = hook_dl(c, dl, &herr);
+            if (herr) return -1;
+            r = recv_msg(c, rdl, &msg, &len, &doc);
+            if (r == 0 && now_ms() < dl) continue;
+        }
         if (r == 0) return slim_seterr("timeout after %d ms waiting for DevTools response", timeout_ms);
         if (r < 0) return slim_seterr("browser connection lost: %s", slim_errmsg());
         if (json_get(doc, "id", &idv) && json_int(idv, -1) == id) {
@@ -195,8 +221,10 @@ int cdp_event(cdp_t *c, const char *sid, const char *methods, int timeout_ms, ch
     long long dl = now_ms() + timeout_ms;
     for (;;) {
         char *m; size_t len; jv doc, mv;
-        int r = recv_msg(c, dl, &m, &len, &doc);
-        if (r == 0) return 0;
+        int herr; long long rdl = hook_dl(c, dl, &herr);
+        if (herr) return -1;
+        int r = recv_msg(c, rdl, &m, &len, &doc);
+        if (r == 0) { if (now_ms() < dl) continue; return 0; }
         if (r < 0) return slim_seterr("browser connection lost: %s", slim_errmsg());
         if (!json_get(doc, "method", &mv)) { free(m); continue; }
         if (method_in(mv, methods) && sid_match(doc, sid)) {

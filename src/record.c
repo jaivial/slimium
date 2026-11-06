@@ -1,5 +1,6 @@
 /* Detached screencast recording. Only this process talks to its CDP session and ffmpeg. */
 #include "record.h"
+#include "hold.h"
 #include "b64.h"
 #include <dirent.h>
 #include <errno.h>
@@ -443,6 +444,9 @@ static int image_size(const unsigned char *p, size_t n, int *w, int *h) {
 }
 
 static int apply_rec_viewport(cdp_t *cdp, const char *sid, const rec_t *r, int timeout) {
+    /* the session's keeper owns the overrides; a second session setting them would reset its
+     * metrics when it detaches */
+    if (r->session[0] && hold_owner(r->session, NULL)) return 0;
     if (r->vp_w <= 0) return cdp_call(cdp, sid, "Emulation.clearDeviceMetricsOverride", NULL, timeout, NULL, NULL);
     char p[192];
     snprintf(p, sizeof p, "{\"width\":%d,\"height\":%d,\"deviceScaleFactor\":%g,\"mobile\":%s}",

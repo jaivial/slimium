@@ -127,8 +127,9 @@ remains the complete interface.
 | `geolocation set LAT LON [ACCURACY_M]` / `geolocation clear` | `Emulation.setGeolocationOverride` / `Emulation.clearGeolocationOverride` |
 | `throttle PRESET` | `Network.enable` + `Network.emulateNetworkConditions` |
 | `cache on\|off` | `Network.enable` + `Network.setCacheDisabled` |
-| `dialog accept [TEXT]` / `dialog dismiss` | `Page.handleJavaScriptDialog` |
-| `dialog auto accept\|dismiss [--timeout MS] [--count N]` | `Page.enable`, `Page.javascriptDialogOpening`, `Page.handleJavaScriptDialog` |
+| `dialog accept [TEXT]` / `dialog dismiss` | `Page.handleJavaScriptDialog`, sent by the session keeper (the only session that saw the dialog open) |
+| `dialog auto accept\|dismiss [--timeout MS] [--count N]` | with a keeper: temporary `all=` policy, counted in the dialog log; without one: `Page.enable`, `Page.javascriptDialogOpening`, `Page.handleJavaScriptDialog` |
+| `dialog policy [SPEC]` / `dialogs` | keeper policy per dialog type (accept/dismiss/manual) and the dialog log; see docs/EMULATION.md |
 | `script on\|off` | `Emulation.setScriptExecutionDisabled` |
 
 Network throughput values are bytes/second, as required by CDP:
@@ -161,8 +162,11 @@ wait "$HANDLER"
 slimium permissions reset
 ```
 
-Like other slimium per-command emulation, page overrides last for the owning connection. Use
-`batch` when several operations must share exactly the same connection and overrides.
+Overrides set by these thin wrappers (geolocation, throttle, script, cache) last for the owning
+connection. Use `batch` when several operations must share exactly the same connection and
+overrides. The persistent emulation (viewport, orientation, touch, UA, offline, block) and dialog
+handling belong to the session keeper instead (docs/EMULATION.md). A raw `cdp Emulation.*` call
+for device metrics, touch or UA makes the keeper re-assert the session state afterwards.
 
 ## Downloads and browser history
 

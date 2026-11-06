@@ -300,7 +300,7 @@ static void clear_context(ctx_t *c) {
     if (c->have_st) { state_free(&c->st); c->have_st = 0; }
 }
 static int forbidden_command(const char *cmd) {
-    static const char *const names[] = {"mcp","pipe","batch","chrome","gov",NULL};
+    static const char *const names[] = {"mcp","pipe","batch","chrome","gov","__hold","__record-worker",NULL};
     for (int i = 0; names[i]; i++) if (!strcmp(cmd, names[i])) return 1;
     return 0;
 }

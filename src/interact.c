@@ -586,6 +586,9 @@ static void mouse_params(char *p, size_t n, const char *type, double x, double y
 static int fast_click(ctx_t *c, const char *locator) {
     double x, y;
     if (locator_center(c, locator, &x, &y)) return -1;
+    int t = ctx_tap(c, x, y, 1);
+    if (t < 0) return -1;
+    if (!t) { out_d(c, "x", x); out_d(c, "y", y); out_t(c, "tapped %s at %.0f,%.0f", locator, x, y); return 0; }
     long ids[3];
     char p[256];
     mouse_params(p, sizeof p, "mouseMoved", x, y, NULL, 0);

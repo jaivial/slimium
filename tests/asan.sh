@@ -24,6 +24,7 @@ else
     printf '#!/bin/sh\nexec %s --command="%s/build/asan/slimium" %s "$@"\n' "$FP" "$ROOT" "$SDK" >"$WR/slimium"
     RUNU="$FP --command=$ROOT/build/asan/unit $SDK"
     export SLIM_NO_PROC=1 # host /proc (browser pid, memory) is not visible inside the sandbox
+    export SLIM_HOLD=0    # no keeper: the sandboxed CLI could not validate the host one's pid
 fi
 chmod +x "$WR/slimium"
 echo "== unit (sanitized)"

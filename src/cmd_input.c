@@ -36,6 +36,8 @@ static int mouse(ctx_t *c, const char *type, double x, double y, const char *but
 }
 
 static int click_at(ctx_t *c, double x, double y, int clicks) {
+    int t = ctx_tap(c, x, y, clicks);
+    if (t <= 0) return t;
     if (mouse(c, "mouseMoved", x, y, NULL, 0)) return -1;
     for (int i = 1; i <= clicks; i++)
         if (mouse(c, "mousePressed", x, y, "left", i) || mouse(c, "mouseReleased", x, y, "left", i)) return -1;

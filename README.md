@@ -64,15 +64,17 @@ slimium snapshot --interactive          # compact elements with stable @eN refs
 slimium click @e3
 slimium fill 'label=Email' 'ada@example.test'
 printf '%s\n' '{"cmd":"eval","args":["document.title"]}' '{"cmd":"click","args":["@e3"]}' | slimium pipe
-slimium viewport 390 844                # live responsive resize, no reload
+slimium viewport mobile                # 390x844 dpr 3 touch portrait; kept across reloads and new tabs
 slimium record start run.mp4 --fps 10 && slimium record stop
 slimium profile create work && slimium start --user work
 slimium mcp                             # MCP stdio server for agent clients
 slimium stop
 ```
 
-There is no long-lived slimium process: each command connects to the browser's DevTools
-websocket, attaches to the current tab, runs, and exits (~5-30 ms per command, ~2 MB RSS).
+Each command connects to the browser's DevTools websocket, attaches to the current tab, runs, and
+exits (~5-30 ms per command, ~2 MB RSS). The only long-lived slimium process per session is a
+~2 MB keeper (`__hold`, see [docs/EMULATION.md](docs/EMULATION.md)). It keeps emulation alive
+between commands and handles JavaScript dialogs by policy. `SLIM_HOLD=0` disables it.
 Session state lives in `$XDG_RUNTIME_DIR/slimium/<session>.json` (fallback `/tmp/slimium-$UID`,
 override `SLIM_STATE_DIR`); the browser log next to it in `<session>.log`.
 
@@ -111,7 +113,8 @@ Exit codes: 0 ok, 1 error (one line on stderr), 2 usage error. `SLIM_DEBUG=1` tr
 | `select SEL VALUE` / `check SEL [--off]` | form controls (option value or label) |
 | `wait SEL [--visible] [--gone]` / `wait-load` / `wait-idle [--idle MS]` | waits (bounded by --timeout) |
 | `cookies` / `cookie-set NAME VALUE [--domain D] [--path P] [--url U] [--secure] [--httponly]` / `cookies-clear` / `storage-clear` | storage |
-| `viewport W H [--scale F] [--mobile]` \| `viewport reset`, `ua STRING\|--reset`, `offline on\|off`, `block [PATTERN...]` | emulation, saved in the session and re-applied on every attach |
+| `viewport W H [--scale F] [--mobile] [--touch\|--no-touch] [--orientation portrait\|landscape\|auto]` \| `viewport mobile\|tablet\|desktop\|reset`, `ua STRING\|--reset`, `offline on\|off`, `block [PATTERN...]` | emulation (size, DPR, screen, orientation, touch, UA), held by the session keeper: survives reloads, navigations, new tabs and popups (docs/EMULATION.md) |
+| `dialog policy [TYPE=accept\|dismiss\|manual,...\|reset]` / `dialog accept [TEXT]\|dismiss` / `dialogs [--last N]` | JavaScript dialogs: default beforeunload/alert accept, confirm/prompt dismiss; manual dialogs make commands fail fast until answered |
 | `download-dir DIR\|off` | Browser.setDownloadBehavior (re-applied on connect) |
 | `frames` | frame tree |
 | `console` | console messages, exceptions and log entries (buffered ones are replayed) for --timeout MS (default 1000) |
@@ -127,7 +130,7 @@ Exit codes: 0 ok, 1 error (one line on stderr), 2 usage error. `SLIM_DEBUG=1` tr
 | `upload` / `drag` / `focus` / `submit` / `form fill` | additional form and element operations |
 | `profile create\|list\|use\|save\|restore\|...` | named persistent user profiles and tab-session restore |
 | `record start\|stop\|status\|list` | browser-tab video recording via screencast + runtime ffmpeg |
-| `resize W H` / `responsive OUTDIR --sizes ...` | live viewport resize and multi-breakpoint screenshots |
+| `resize W H` / `responsive OUTDIR --sizes ...` | live viewport resize (alias of `viewport`) and multi-breakpoint screenshots |
 | `protocol domains\|methods\|events\|show\|coverage` | live CDP schema discovery; `cdp-listen` collects events |
 | `mcp` | stdio JSON-RPC MCP server with persistent in-process command invocation |
 
@@ -136,9 +139,9 @@ Selectors include CSS, `xpath=`, `text=`, `role=...`, `testid=`, `label=` and sn
 See docs/INTERACTION.md for staleness, actionability and pipeline semantics.
 
 Notes:
-- DevTools resets emulation overrides when a client disconnects, so `viewport`/`ua`/`offline`/`block`
-  are active while slimium is connected (i.e. during every slimium command and batch). Use `batch`
-  or `start -- --user-agent=...` / `--window` for settings that must hold between commands.
+- DevTools resets emulation overrides when a client disconnects. The session keeper therefore holds
+  `viewport`/`ua`/`offline`/`block` in its own persistent session. Without it (`SLIM_HOLD=0`,
+  `--port`) they are only active while a slimium command is connected.
 - `block` (Network.setBlockedURLs) blocks subresource requests, not top-level navigations.
 - In `--port` mode nothing is persisted; the current tab is the first page target unless `--tab`.
 

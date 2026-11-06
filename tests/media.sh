@@ -74,8 +74,8 @@ t viewport-no-reload 0 '^media-alive$' eval 'window.mediaSentinel'
 t viewport-css-tablet 0 'tablet' eval 'getComputedStyle(document.querySelector("#break"),"::after").content'
 t resize-alias 0 'viewport 900x500' resize 900 500
 t resize-dom 0 '^\[900,500\]$' eval '[innerWidth,innerHeight]'
-t preset-mobile 0 'viewport 375x812' viewport mobile
-t preset-mobile-dom 0 '^\[375,812\]$' eval '[innerWidth,innerHeight]'
+t preset-mobile 0 'viewport 390x844 mobile touch portrait dpr 3' viewport mobile
+t preset-mobile-dom 0 '^\[390,844,3\]$' eval '[innerWidth,innerHeight,devicePixelRatio]'
 t preset-mobile-css 0 'mobile' eval 'getComputedStyle(document.querySelector("#break"),"::after").content'
 t preset-tablet 0 'viewport 768x1024' viewport tablet
 t preset-tablet-css 0 'tablet' eval 'getComputedStyle(document.querySelector("#break"),"::after").content'

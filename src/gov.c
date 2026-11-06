@@ -462,6 +462,28 @@ static int cdp_up(gov_t *g) {
     return 0;
 }
 
+/* A session's emulation keeper (docs/EMULATION.md) stays attached to every tab, so "attached" no
+ * longer means a client uses the tab. It marks itself in <udd>/.slimium-keeper; hibernated tabs are
+ * then listed in <udd>/.slimium-hibernated and the next command for such a tab restores it itself. */
+static int keeper_on(gov_t *g) {
+    char p[PATH_MAX], b[64];
+    if (!g->cfg->udd || !*g->cfg->udd) return 0;
+    snprintf(p, sizeof p, "%s/.slimium-keeper", g->cfg->udd);
+    if (rdb(p, b, sizeof b) <= 0) return 0;
+    unsigned long long st = 0; int pid = 0;
+    if (sscanf(b, "%d %llu", &pid, &st) != 2) return 0;
+    return alive_as(pid, st);
+}
+static void hib_file(gov_t *g) {
+    if (!g->cfg->udd || !*g->cfg->udd) return;
+    char p[PATH_MAX];
+    snprintf(p, sizeof p, "%s/.slimium-hibernated", g->cfg->udd);
+    sbuf b = {0};
+    for (int i = 0; i < g->ntabs; i++) if (g->tabs[i].hib) sb_printf(&b, "%s %lld\n", g->tabs[i].id, g->tabs[i].entry);
+    if (b.n) write_file(p, b.p, b.n, 1); else unlink(p);
+    sb_free(&b);
+}
+
 static tabrec *tab_get(gov_t *g, const char *id, int create) {
     for (int i = 0; i < g->ntabs; i++) if (!strcmp(g->tabs[i].id, id)) return &g->tabs[i];
     if (!create || g->ntabs >= MAXTABS || strlen(id) >= sizeof g->tabs[0].id) return NULL;
@@ -477,7 +499,9 @@ static void tab_event(gov_t *g, jv m, jv pr) {
     if (json_str_eq(m, "Target.targetDestroyed")) {
         char *id = json_get_str(pr, "targetId");
         tabrec *r = id ? tab_get(g, id, 0) : NULL;
+        int had = r && r->hib;
         if (r) *r = g->tabs[--g->ntabs];
+        if (had) hib_file(g);
         free(id);
         return;
     }
@@ -493,7 +517,11 @@ static void tab_event(gov_t *g, jv m, jv pr) {
         r->attached = att;
         if (t >= g->quiet_until) r->last = t;
         /* someone else navigated it (our own about:blank navigation reports the old URL first) */
-        if (r->hib && t >= g->quiet_until && url && strcmp(url, "about:blank")) r->hib = 0;
+        if (r->hib && t >= g->quiet_until && url && strcmp(url, "about:blank")) {
+            r->hib = 0;
+            hib_file(g);
+            ev_t e; ev_new(g, &e, "restore"); ev_s(&e, "tab", r->id); ev_s(&e, "by", "client"); ev_i(&e, "ok", 1); ev_end(g, &e);
+        }
     }
     free(id); free(url);
 }
@@ -529,6 +557,7 @@ static int restore_tab(gov_t *g, tabrec *t) {
     }
     free(sid);
     t->hib = t->want = 0; t->last = now_ms();
+    hib_file(g);
     g->quiet_until = now_ms() + 1500;
     ev_t e; ev_new(g, &e, "restore"); ev_s(&e, "tab", t->id); ev_i(&e, "ok", ok); ev_end(g, &e);
     return ok;
@@ -572,12 +601,14 @@ static int hibernate_pass(gov_t *g, int ignore_age) {
     for (int i = 1; i < n; i++)    /* most recent first */
         for (int j = i; j > 0 && g->tabs[idx[j]].last > g->tabs[idx[j - 1]].last; j--) { int x = idx[j]; idx[j] = idx[j - 1]; idx[j - 1] = x; }
     long long t = now_ms();
+    int kp = keeper_on(g);
     for (int i = g->cfg->hibernate; i < n; i++) {
         tabrec *r = &g->tabs[idx[i]];
-        if (r->hib || r->attached || (!ignore_age && t - r->last < (long long)g->cfg->hib_min_s * 1000)) continue;
+        if (r->hib || (r->attached && !kp) || (!ignore_age && t - r->last < (long long)g->cfg->hib_min_s * 1000)) continue;
         done += hibernate_tab(g, r);
     }
     g->quiet_until = now_ms() + 1500;
+    if (done) hib_file(g);
     return done;
 }
 
