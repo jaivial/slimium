@@ -457,7 +457,10 @@ int cmd_status(ctx_t *c, int argc, char **argv) {
         out_b(c, "attached", c->st.attached);
         if (c->st.attached) out_t(c, "attached yes\n");
         if (c->st.target) { out_t(c, "tab      %s\n", c->st.target); out_s(c, "tab", c->st.target); }
-        if (c->st.user) { out_t(c, "user     %s\n", c->st.user); out_s(c, "user", c->st.user); }
+        if (c->st.user) {
+            out_t(c, "user     %s\n", c->st.user); out_s(c, "user", c->st.user);
+            if (c->st.udd) { out_t(c, "data     %s\n", c->st.udd); out_s(c, "user_data_dir", c->st.udd); }
+        }
     }
     out_t(c, "tabs     %d", tabs); out_i(c, "tabs", tabs);
     if (have_mem) {
