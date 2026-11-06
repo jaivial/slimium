@@ -9,6 +9,9 @@ export CU_SLIM_HOME=$HOME/.local/share/cu-slim
 export CU_SLIM_PORT=8790
 export CU_SLIM_CDP_PORT=9390
 TMP=$(mktemp -d /tmp/cu-slim-mcp-test.XXXXXX)
+# cu's legacy MCP discovery may create .cu in cwd even with CU_DAEMON_DIR set.
+# Keep that state inside the disposable test directory, never in the source tree.
+cd "$TMP"
 DAEMON_PID=
 cleanup() {
   if [ -n "$DAEMON_PID" ]; then
