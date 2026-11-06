@@ -11,7 +11,8 @@ process model, with every operation available from the command line, built to be
 - **Everything on the CLI.** One <300 KB C binary (libc only), ~2 MB RSS on ordinary commands; all 674 methods
   advertised by Chromium 156 are invocable, with live schema discovery ([docs/CDP.md](docs/CDP.md)).
 - **Fast element workflows.** Compact snapshots with stable `@eN` refs, CSS/XPath/text/role/test-id/label locators,
-  `act` action arrays and a persistent NDJSON `pipe` ([docs/INTERACTION.md](docs/INTERACTION.md)).
+  `act` action arrays and a persistent NDJSON `pipe` ([docs/INTERACTION.md](docs/INTERACTION.md)); act/pipe cut
+  median action latency by 88.2%/87.4% versus batch ([docs/PERFORMANCE.md](docs/PERFORMANCE.md)).
 - **Persistent user profiles.** Named, isolated browser profiles keep website login storage across browser/daemon
   restarts; `profile save/restore` also restores tabs and scroll ([docs/PROFILES.md](docs/PROFILES.md)).
 - **MCP without process churn.** `slimium mcp` offers 24 closed-schema tools over one persistent CDP connection,
