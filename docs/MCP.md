@@ -141,11 +141,11 @@ identical workload in each mode):
 
 | mode | processes / connections | median per call | total for 100 | overall calls/s | 1000 / median ms |
 |---|---:|---:|---:|---:|---:|
-| MCP | 1 / 1 | 0.317 ms | 91.8 ms | 1089.4 | 3155.9 |
-| separate CLI | 100 / 100 | 1.219 ms | 170.6 ms | 586.2 | 820.2 |
-| CLI batch | 1 / 1 | 0.202 ms | 75.7 ms | 1321.3 | 4946.8 |
+| MCP | 1 / 1 | 0.249 ms | 85.0 ms | 1177.0 | 4015.5 |
+| separate CLI | 100 / 100 | 0.994 ms | 163.6 ms | 611.3 | 1006.0 |
+| CLI batch | 1 / 1 | 0.109 ms | 82.4 ms | 1213.8 | 9173.7 |
 
-The MCP process was 2312 KiB RSS after the browser workloads. Batch remains useful when input is
+The MCP process was 2376 KiB RSS after the browser workloads. Batch remains useful when input is
 already line-oriented; MCP avoids both per-command process setup and repeated CDP attach setup
 while adding structured protocol access. Benchmark timing includes JSON/Python test-client round
 trips for MCP and process spawn for each separate CLI invocation; it is not a Chromium rendering
