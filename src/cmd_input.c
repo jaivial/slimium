@@ -221,7 +221,7 @@ int cmd_fill(ctx_t *c, int argc, char **argv) {
         if (r) return -1;
     }
     sbuf b = {0};
-    js_el(&b, argv[0], "e.dispatchEvent(new Event('change',{bubbles:true}));return 'value' in e?e.value:e.innerText");
+    js_el(&b, argv[0], "e.dispatchEvent(new Event('change',{bubbles:true}));return e.type==='password'?undefined:'value' in e?e.value:e.innerText");
     char *r; jv o, v;
     int rc = ctx_eval(c, b.p, &r, &o);
     sb_free(&b);
