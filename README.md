@@ -8,8 +8,16 @@ process model, with every operation available from the command line, built to be
   the engine's file pages (private reflinked engine copy, own systemd scope, pid preserved).
 - **Pixel-identical rendering.** Screenshots match stock Chromium (0.0% pixel diff on text/web fonts, images, canvas,
   SVG, CSS, WebGL, full page, Wikipedia).
-- **Everything on the CLI.** One 134 KB C binary (libc only), ~2 MB RSS and 3-30 ms per command; `batch` runs many
-  commands over one connection; `cdp` reaches any DevTools method.
+- **Everything on the CLI.** One <300 KB C binary (libc only), ~2 MB RSS on ordinary commands; all 674 methods
+  advertised by Chromium 156 are invocable, with live schema discovery ([docs/CDP.md](docs/CDP.md)).
+- **Fast element workflows.** Compact snapshots with stable `@eN` refs, CSS/XPath/text/role/test-id/label locators,
+  `act` action arrays and a persistent NDJSON `pipe` ([docs/INTERACTION.md](docs/INTERACTION.md)).
+- **Persistent user profiles.** Named, isolated browser profiles keep website login storage across browser/daemon
+  restarts; `profile save/restore` also restores tabs and scroll ([docs/PROFILES.md](docs/PROFILES.md)).
+- **MCP without process churn.** `slimium mcp` offers 24 closed-schema tools over one persistent CDP connection,
+  plus generic CLI/batch/CDP forwarding ([docs/MCP.md](docs/MCP.md)).
+- **Screenshots, video and responsive testing.** Capture PNG/JPEG/WebP, record MP4/WebM/AVI, resize the live page
+  without reloading and capture several breakpoints ([docs/MEDIA.md](docs/MEDIA.md)).
 - **Built for cu.** `CU_BROWSER=slimium-chrome` is a drop-in browser for cu: cu's 71-check suite passes
   ([docs/CU.md](docs/CU.md)); `cu-slim` is a second, isolated cu deployment wired to slimium.
 
@@ -34,8 +42,9 @@ See AGENTS.md for the rules and layout.
 ## Build
 
 ```sh
-make                 # ./slimium (+ ./slimium-chrome symlink); C11, libc only, gcc -Os, stripped (~100 KB)
-make test            # unit tests + functional suite (starts a headless browser on port 9310)
+make                 # ./slimium (+ ./slimium-chrome symlink); C11, libc only, gcc -Os, stripped <300 KB
+make test            # unit, functional, governor, profiles, interaction, media, protocol and MCP suites
+make test-cu         # isolated cu-slim CLI + native MCP integration (ports 8790/9390)
 make test-asan       # same under AddressSanitizer/UBSan/LeakSanitizer (host libasan or Flatpak SDK gcc)
 make install         # PREFIX=~/.local -> ~/.local/bin/slimium + slimium-chrome symlink
 ```
@@ -50,6 +59,14 @@ slimium fill '#q' 'hello' && slimium press Enter
 slimium text                            # document.body.innerText
 slimium shot page.png --full            # png|jpeg|webp from extension or --format
 slimium --json eval 'document.title'    # {"ok":true,"value":"...","type":"string"}
+slimium snapshot --interactive          # compact elements with stable @eN refs
+slimium click @e3
+slimium fill 'label=Email' 'ada@example.test'
+printf '%s\n' '{"cmd":"eval","args":["document.title"]}' '{"cmd":"click","args":["@e3"]}' | slimium pipe
+slimium viewport 390 844                # live responsive resize, no reload
+slimium record start run.mp4 --fps 10 && slimium record stop
+slimium profile create work && slimium start --user work
+slimium mcp                             # MCP stdio server for agent clients
 slimium stop
 ```
 
@@ -104,9 +121,18 @@ Exit codes: 0 ok, 1 error (one line on stderr), 2 usage error. `SLIM_DEBUG=1` tr
 | `context-new [--url URL]` / `context-close ID` / `contexts` | isolated browser contexts (incognito-like) |
 | `cdp METHOD [PARAMS_JSON] [--target browser\|page] [--events MS]` | raw DevTools passthrough: any protocol method |
 | `batch` | read commands from stdin, one per line (shell-like quoting, `#` comments), run over ONE connection, one JSON line each |
+| `snapshot` / `find` / `inspect` | compact element tree, stable `@eN` refs and element details |
+| `act JSON\|@file\|-` / `pipe` | action arrays / persistent NDJSON pipeline over one connection |
+| `upload` / `drag` / `focus` / `submit` / `form fill` | additional form and element operations |
+| `profile create\|list\|use\|save\|restore\|...` | named persistent user profiles and tab-session restore |
+| `record start\|stop\|status\|list` | browser-tab video recording via screencast + runtime ffmpeg |
+| `resize W H` / `responsive OUTDIR --sizes ...` | live viewport resize and multi-breakpoint screenshots |
+| `protocol domains\|methods\|events\|show\|coverage` | live CDP schema discovery; `cdp-listen` collects events |
+| `mcp` | stdio JSON-RPC MCP server with persistent in-process command invocation |
 
-Selectors are CSS; `//...` or `xpath=...` selects by XPath. Elements inside iframes: use `--tab`
-with the frame's target or `cdp`.
+Selectors include CSS, `xpath=`, `text=`, `role=...`, `testid=`, `label=` and snapshot refs
+(`@eN`). Snapshots traverse open shadow roots and frames where CDP exposes a context.
+See docs/INTERACTION.md for staleness, actionability and pipeline semantics.
 
 Notes:
 - DevTools resets emulation overrides when a client disconnects, so `viewport`/`ua`/`offline`/`block`
@@ -123,7 +149,8 @@ the low-memory profile merged into the given argv — a drop-in browser for cu: 
 | env | |
 |---|---|
 | `SLIM_CHROMIUM` | engine path (default: first of chromium-browser, chromium, google-chrome-stable, google-chrome in PATH) |
-| `SLIM_PROFILE` | `off\|balanced\|max` (default balanced) |
+| `SLIM_PROFILE` | memory profile: `off\|balanced\|max` (default balanced) |
+| `SLIM_USER_PROFILE` | named persistent website-login profile; overrides the caller's data dir |
 | `SLIM_WRAPPER_LOG=FILE` | append the final argv (shell-quoted) |
 | `SLIM_ENGINE_DIRECT=0` | do not bypass distro launcher scripts (Fedora's chromium-browser.sh adds flags and two `cat` processes; by default the sibling ELF is exec'd) |
 

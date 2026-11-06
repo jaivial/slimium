@@ -6,7 +6,7 @@
 #include "state.h"
 #include "util.h"
 
-#define SLIM_VERSION "0.1.0"
+#define SLIM_VERSION "0.2.0"
 #define DEFAULT_TIMEOUT 30000
 
 typedef struct ctx {
