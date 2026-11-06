@@ -1,9 +1,12 @@
-/* Unit tests: JSON reader/builder, base64, SHA-1, WebSocket framing (over a socketpair). */
+/* Unit tests: JSON reader/builder, base64, SHA-1, WebSocket framing (over a socketpair),
+ * the read-only Cookies SQLite scanner (fixtures made by the sqlite3 CLI when present). */
 #include "b64.h"
+#include "cookiedb.h"
 #include "json.h"
 #include "util.h"
 #include "ws.h"
 #include <signal.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -219,9 +222,108 @@ static void t_ws(void) {
     CHECK(tcp_connect("example.com", 80, 100) < 0); /* names other than localhost are refused */
 }
 
+/* Chromium 156's cookies schema; expected: 750 v10, 1125 v11 (375 spill into overflow pages),
+ * 375 other blobs, 750 empty blobs (unencrypted) not counted, and v1x-looking TEXT ignored. */
+static const char COOKIE_SQL[] =
+    "CREATE TABLE meta(key LONGVARCHAR NOT NULL UNIQUE PRIMARY KEY, value LONGVARCHAR);"
+    "INSERT INTO meta VALUES('version','24');"
+    "CREATE TABLE cookies(creation_utc INTEGER NOT NULL,host_key TEXT NOT NULL,top_frame_site_key TEXT NOT NULL,"
+    "name TEXT NOT NULL,value TEXT NOT NULL,encrypted_value BLOB NOT NULL,path TEXT NOT NULL,expires_utc INTEGER NOT NULL,"
+    "is_secure INTEGER NOT NULL,is_httponly INTEGER NOT NULL,last_access_utc INTEGER NOT NULL,has_expires INTEGER NOT NULL,"
+    "is_persistent INTEGER NOT NULL,priority INTEGER NOT NULL,samesite INTEGER NOT NULL,source_scheme INTEGER NOT NULL,"
+    "source_port INTEGER NOT NULL,last_update_utc INTEGER NOT NULL,source_type INTEGER NOT NULL,has_cross_site_ancestor INTEGER NOT NULL);"
+    "CREATE UNIQUE INDEX cookies_unique_index ON cookies(host_key, top_frame_site_key, has_cross_site_ancestor, name, path, source_scheme, source_port);"
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<3000) "
+    "INSERT INTO cookies SELECT i,'v11host'||i,'','v10name'||i,CASE WHEN i%4=2 THEN 'plain' ELSE '' END,"
+    "CASE WHEN i%4=0 THEN CAST('v10'||hex(randomblob(16)) AS BLOB) WHEN i%4=1 THEN CAST('v11'||hex(randomblob(16)) AS BLOB) "
+    "WHEN i%4=2 THEN X'' WHEN i%8=3 THEN CAST('v11'||hex(zeroblob(3000)) AS BLOB) ELSE CAST('xyz' AS BLOB) END,"
+    "'/',0,0,0,0,0,0,0,0,0,0,0,0,0 FROM n;";
+
+/* Feed SQL (and dot-commands, one per line) to the sqlite3 CLI on stdin. */
+static int sqlite(const char *dir, const char *db, const char *sql) {
+    char cmd[512];
+    snprintf(cmd, sizeof cmd, "cd '%s' && sqlite3 -bail '%s' >/dev/null", dir, db);
+    FILE *f = popen(cmd, "w");
+    if (!f) return -1;
+    fputs(sql, f);
+    return pclose(f);
+}
+
+static int sh(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static int sh(const char *fmt, ...) {
+    char cmd[8192]; va_list ap; va_start(ap, fmt); vsnprintf(cmd, sizeof cmd, fmt, ap); va_end(ap);
+    return system(cmd);
+}
+
+static void t_cookiedb(void) {
+    char dir[] = "/tmp/slimium-unit.XXXXXX", p[256];
+    cookie_scan_t s;
+    CHECK(mkdtemp(dir) != NULL);
+    snprintf(p, sizeof p, "%s/missing", dir);
+    memset(&s, 0, sizeof s);
+    CHECK(cookiedb_scan(p, &s) == 0 && !s.v10 && !s.v11 && !s.other);
+    snprintf(p, sizeof p, "%s/empty", dir);
+    CHECK(write_file(p, "", 0, 0) == 0 && cookiedb_scan(p, &s) == 0 && !s.v10 && !s.v11);
+    snprintf(p, sizeof p, "%s/text", dir);
+    CHECK(write_file(p, "not a database at all, not a database at all, not a database at all, not a database at all, padding", 100, 0) == 0);
+    CHECK(cookiedb_scan(p, &s) == -1);
+    if (sh("command -v sqlite3 >/dev/null 2>&1")) {
+        printf("unit: cookiedb SQLite fixtures skipped (no sqlite3 CLI)\n");
+        sh("rm -rf '%s'", dir);
+        return;
+    }
+    static const int sizes[] = {512, 4096, 65536};
+    for (int i = 0; i < 3; i++) {
+        char db[32], sql[sizeof COOKIE_SQL + 64];
+        snprintf(db, sizeof db, "c%d", sizes[i]);
+        snprintf(p, sizeof p, "%s/%s", dir, db);
+        snprintf(sql, sizeof sql, "PRAGMA page_size=%d;\n%s\n", sizes[i], COOKIE_SQL);
+        CHECK(sqlite(dir, db, sql) == 0);
+        memset(&s, 0, sizeof s);
+        CHECK(cookiedb_scan(p, &s) == 0);
+        CHECK(s.v10 == 750 && s.v11 == 1125 && s.other == 375);
+        if (s.v10 != 750 || s.v11 != 1125 || s.other != 375)
+            fprintf(stderr, "page %d: v10 %lu v11 %lu other %lu\n", sizes[i], s.v10, s.v11, s.other);
+    }
+    /* After a crash, WAL-mode rows may exist only in <db>-wal: snapshot both while the writer is open. */
+    snprintf(p, sizeof p, "%s/wal", dir);
+    CHECK(sqlite(dir, "w.db", "CREATE TABLE cookies(name TEXT, value TEXT, encrypted_value BLOB);\n"
+                 "INSERT INTO cookies VALUES('a','',CAST('v10x' AS BLOB));\n") == 0);
+    CHECK(sqlite(dir, "w.db", "PRAGMA journal_mode=WAL;\nPRAGMA wal_autocheckpoint=0;\n"
+                 "INSERT INTO cookies VALUES('b','',CAST('v11y' AS BLOB));\n.shell cp w.db wal && cp w.db-wal wal-wal\n") == 0);
+    snprintf(p, sizeof p, "%s/wal-wal", dir);
+    CHECK(access(p, F_OK) == 0);
+    snprintf(p, sizeof p, "%s/wal", dir);
+    memset(&s, 0, sizeof s);
+    CHECK(cookiedb_scan(p, &s) == 0 && s.v10 >= 1 && s.v11 >= 1);
+    /* Corruption: random byte flips and truncations must fail or succeed, never crash or hang. */
+    char *orig = NULL; size_t len = 0;
+    snprintf(p, sizeof p, "%s/c512", dir);
+    CHECK(read_file(p, &orig, &len, 64u << 20) == 0);
+    snprintf(p, sizeof p, "%s/fuzz", dir);
+    unsigned seed = 7451;
+    int okc = 0, errc = 0;
+    for (int it = 0; it < 400 && orig && len; it++) {
+        char *m = malloc(len);
+        memcpy(m, orig, len);
+        size_t n = it % 10 == 9 ? (size_t)(rand_r(&seed) % len) : len;
+        for (int f = 0; f < 1 + it % 16; f++) {
+            size_t at = (size_t)rand_r(&seed) % (it % 2 ? len : 4096);
+            m[at] = (char)rand_r(&seed);
+        }
+        CHECK(write_file(p, m, n, 0) == 0);
+        memset(&s, 0, sizeof s);
+        if (cookiedb_scan(p, &s) == 0) okc++; else errc++;
+        free(m);
+    }
+    CHECK(okc + errc == 400 && errc > 0);
+    free(orig);
+    sh("rm -rf '%s'", dir);
+}
+
 int main(void) {
     signal(SIGPIPE, SIG_IGN);
-    t_json(); t_b64(); t_sha1(); t_ws();
+    t_json(); t_b64(); t_sha1(); t_ws(); t_cookiedb();
     printf("unit: %d checks, %d failures\n", checks, fails);
     return fails != 0;
 }

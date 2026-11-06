@@ -96,7 +96,10 @@ static const struct { const char *name; char sep; int opp; } lists[] = {
  * --renderer-process-limit=4, which would otherwise undo the process model).
  * Every other switch the caller set wins (identity / functional switches:
  * --user-data-dir, --remote-debugging-port, --headless, --user-agent,
- * --window-size, --proxy-server, --lang, ...). */
+ * --window-size, --proxy-server, --lang, ...). For a named user profile the
+ * callers (start --user, slimium-chrome + SLIM_USER_PROFILE) replace
+ * --user-data-dir and --password-store with the profile's own values before
+ * this merge, so the identity always wins there. */
 static const char *const profile_wins[] = {
     "renderer-process-limit", "process-per-site", "process-per-tab", "single-process", "no-zygote",
     "in-process-gpu", "disable-gpu", "disable-gpu-compositing", "disable-software-rasterizer",
