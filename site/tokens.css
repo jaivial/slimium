@@ -11,8 +11,31 @@
   --color-paper: oklch(96.5% 0.004 250); --color-paper-2: oklch(93% 0.006 250); --color-paper-3: oklch(89% 0.008 250);
   --color-ink: oklch(21% 0.012 255); --color-ink-2: oklch(38% 0.012 255); --color-muted: oklch(52% 0.01 255);
   --color-rule: oklch(84% 0.008 255);
-  --color-accent: oklch(57% 0.2 33); --color-accent-ink: oklch(99% 0.003 250); --color-focus: oklch(50% 0.2 33);
+  --color-accent: oklch(55% 0.2 33); --color-accent-ink: oklch(99% 0.003 250); --color-focus: oklch(49% 0.2 33);
+  --color-code: oklch(21% 0.012 255); --color-code-ink: oklch(96.5% 0.004 250);
   --font-display: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", "DejaVu Sans Mono", monospace; --font-body: system-ui, "Segoe UI", "Noto Sans", "Helvetica Neue", Arial, sans-serif; --font-outlier: var(--font-body);
   --radius-card: 4px; --radius-pill: 999px; --rule-hair: 1px; --shadow-card: none;
   --tracking-display: -0.02em;
+}
+
+/* Dark: every colour re-derived from the light one, hue unchanged (contrast checked: ink 16.3:1,
+   ink-2 11.1, muted 7.3, accent on paper 6.3, accent-ink on accent 6.3, code 15.2). */
+[data-mode="dark"] {
+  --color-paper: oklch(16% 0.012 255); --color-paper-2: oklch(20% 0.012 255); --color-paper-3: oklch(23% 0.012 255);
+  --color-ink: oklch(94% 0.008 255); --color-ink-2: oklch(82% 0.01 255); --color-muted: oklch(70% 0.01 255);
+  --color-rule: oklch(32% 0.012 255);
+  --color-accent: oklch(68% 0.17 33); --color-accent-ink: oklch(16% 0.012 255); --color-focus: oklch(76% 0.14 33);
+  --color-code: oklch(20% 0.012 255); --color-code-ink: oklch(94% 0.008 255);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-mode]) {
+    --color-paper: oklch(16% 0.012 255); --color-paper-2: oklch(20% 0.012 255); --color-paper-3: oklch(23% 0.012 255);
+    --color-ink: oklch(94% 0.008 255); --color-ink-2: oklch(82% 0.01 255); --color-muted: oklch(70% 0.01 255);
+    --color-rule: oklch(32% 0.012 255);
+    --color-accent: oklch(68% 0.17 33); --color-accent-ink: oklch(16% 0.012 255); --color-focus: oklch(76% 0.14 33);
+    --color-code: oklch(20% 0.012 255); --color-code-ink: oklch(94% 0.008 255);
+    color-scheme: dark;
+  }
 }

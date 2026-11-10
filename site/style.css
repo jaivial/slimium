@@ -1,6 +1,6 @@
 /* Hallmark · shape: Ledger, a measured page read top to bottom · genre: modern-minimal · theme: custom · job: try · idea: "the page weighs what the browser weighs: the measurement is the type" · vibe: "measured, terse, workbench light, one red signal"
  * paper: oklch(96.5% 0.004 250) · accent: oklch(57% 0.2 33) · display: system monospace · body: system sans · hero: headline and one sentence on the left, the two measured footprints set huge on the right · nav: a wordmark and four section links · footer: the wordmark over two lines of links · imagery: none, the numbers are the picture · signature: 225 MB set huge over a dimmed 532 MB
- * axes: light/mono/chromatic-vermilion · posture: restrained · contrast: pass · fold: pass · v2.0.0 */
+ * axes: light/mono/chromatic-vermilion · posture: restrained · contrast: pass · fold: pass · modes: light and dark (system preference, or the toggle) · v2.0.0 */
 /* Hallmark · pre-emit critique: P4 H5 E4 S4 R5 V4 · weakest: P, a spec page argues little; the head of every section states a measured fact instead of a claim */
 /* Hallmark · waive 77 · a two-column split whose right half is a 300px command block · slimium is a command-line browser, so its commands are the section's picture */
 /* Hallmark · dismissed 58 · the window holds the three-row footprint table, read as figures, not prose */
@@ -17,6 +17,11 @@
 .mark { font-family: var(--font-display); font-weight: 700; font-size: var(--text-lg); letter-spacing: -0.03em; text-decoration: none; color: var(--color-ink); }
 .mark::before { content: ""; display: inline-block; width: 0.55em; height: 0.55em; margin-right: 0.35em; background: var(--color-accent); vertical-align: 0.05em; }
 nav { display: flex; flex-wrap: wrap; gap: var(--space-lg); margin-left: auto; font-size: var(--text-sm); }
+.mode { min-height: 36px; padding: 0 var(--space-sm); border: var(--rule-hair) solid var(--color-rule); border-radius: var(--radius-card); background: transparent; color: var(--color-ink); font-size: var(--text-sm); cursor: pointer; transition: border-color var(--dur-micro) var(--ease-out); }
+.mode:hover { border-color: var(--color-ink-2); }
+.mode:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.mode:active { transform: translateY(1px); }
+.mode:disabled { opacity: 0.5; cursor: not-allowed; }
 nav a { color: var(--color-ink-2); text-decoration: none; }
 nav a:hover { color: var(--color-ink); text-decoration: underline; }
 
@@ -71,7 +76,7 @@ td.strong { color: var(--color-accent); font-weight: 700; }
 /* cli */
 .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: var(--space-2xl); align-items: start; }
 .split p { margin-top: var(--space-lg); color: var(--color-ink-2); }
-.code { margin: 0; padding: var(--space-xl); background: var(--color-ink); color: var(--color-paper); border-radius: var(--radius-card); overflow-x: auto; font-size: var(--text-md); line-height: 1.75; }
+.code { margin: 0; padding: var(--space-xl); background: var(--color-code); color: var(--color-code-ink); box-shadow: inset 0 0 0 1px var(--color-rule); border-radius: var(--radius-card); overflow-x: auto; font-size: var(--text-md); line-height: 1.75; }
 .code code { font-size: inherit; }
 
 /* costs */
@@ -89,6 +94,11 @@ a:focus-visible, .button:focus-visible { outline: 2px solid var(--color-focus); 
   .levers { grid-template-columns: minmax(0, 1fr); }
   .hero { padding-block: var(--space-2xl) var(--space-xl); }
 }
+/* light text on a dark ground reads heavier */
+[data-mode="dark"] body { font-weight: 350; }
+@media (prefers-color-scheme: dark) { :root:not([data-mode]) body { font-weight: 350; } }
+
 @media (max-width: 40rem) {
   nav { display: none; }
+  .mode { margin-left: auto; }
 }
