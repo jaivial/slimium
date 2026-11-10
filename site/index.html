@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>slimium: Chromium para agentes, con menos de la mitad de memoria</title>
+  <meta name="description" content="slimium es un navegador para agentes de IA escrito en C: el motor de Chromium con un modelo de procesos de poca memoria, un gobernador de memoria y todo por la línea de comandos. Es el navegador de cu-slim.">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23f3f4f6'/%3E%3Crect x='7' y='9' width='18' height='3' fill='%23d94a2b'/%3E%3Crect x='7' y='15' width='11' height='3' fill='%231f2329'/%3E%3Crect x='7' y='21' width='14' height='3' fill='%231f2329'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Saltar al contenido</a>
+
+  <header class="top">
+    <div class="container bar">
+      <a class="mark" href="#main">slimium</a>
+      <nav aria-label="Secciones">
+        <a href="#numeros">Números</a>
+        <a href="#como">Cómo</a>
+        <a href="#cli">Línea de comandos</a>
+        <a href="#cu">Con cu</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="container hero">
+      <div class="hero-copy">
+        <h1>Chromium para agentes, a mitad de memoria</h1>
+        <p class="lead">El mismo motor, otro modelo de procesos y un gobernador de memoria.</p>
+        <p class="actions">
+          <a class="button" href="https://github.com/jaivial/cu#cu-on-slimium">Úsalo con cu</a>
+          <a class="link" href="https://github.com/jaivial/slimium">Ver el código</a>
+        </p>
+      </div>
+      <figure class="weigh" aria-labelledby="weigh-cap">
+        <div class="weigh-row now">
+          <p class="figure"><span class="n">225</span> MB</p>
+          <p class="who">slimium</p>
+        </div>
+        <div class="weigh-row was">
+          <p class="figure"><span class="n">532</span> MB</p>
+          <p class="who">Chromium, en el modo rápido de cu</p>
+        </div>
+        <figcaption id="weigh-cap">Trece pestañas a través de cu: huella aislada estable, mediana.</figcaption>
+      </figure>
+    </section>
+
+    <section class="container block" id="numeros">
+      <h2>Trece pestañas, 0,42 veces la memoria</h2>
+      <div class="table-wrap">
+        <table>
+          <caption>Huella aislada del árbol de procesos, en MB.</caption>
+          <thead>
+            <tr><th scope="col">13 pestañas por cu</th><th scope="col" class="num">Chromium</th><th scope="col" class="num">slimium</th><th scope="col" class="num">Proporción</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">Contra Chromium sin flags</th><td class="num">709</td><td class="num">225</td><td class="num strong">0,32×</td></tr>
+            <tr><th scope="row">Contra el modo rápido de cu</th><td class="num">532</td><td class="num">225</td><td class="num strong">0,42×</td></tr>
+            <tr><th scope="row">Pico en una pasada activa</th><td class="num">590</td><td class="num">368</td><td class="num">0,62×</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Las capturas salen idénticas a las de Chromium, píxel a píxel.</p>
+    </section>
+
+    <section class="container block" id="como">
+      <h2>Tres palancas y ningún parche al motor</h2>
+      <ol class="levers">
+        <li>
+          <h3>Menos procesos</h3>
+          <p>Un renderer, sin aislamiento de sitios, con flags de memoria.</p>
+        </li>
+        <li>
+          <h3>Un gobernador que espera</h3>
+          <p>Tras 30 s sin uso, GC y fuera las páginas frías del motor.</p>
+        </li>
+        <li>
+          <h3>Su propio scope</h3>
+          <p>Su scope de systemd y su copia del motor; solo toca lo suyo.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section class="container block split" id="cli">
+      <div>
+        <h2>Todo por la línea de comandos</h2>
+        <p>Un binario de C de menos de 300 KB, solo libc.</p>
+      </div>
+      <pre class="code" aria-label="Ejemplo de uso"><code>make &amp;&amp; make install
+slimium start
+slimium nav example.com
+slimium snapshot --interactive
+slimium shot portada.png --full
+slimium mem
+slimium mcp</code></pre>
+    </section>
+
+    <section class="container block" id="cu">
+      <h2>El navegador de cu-slim</h2>
+      <p class="intro">cu lo usa con <code>CU_BROWSER=slimium-chrome</code>.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th scope="col">QA de 38 comandos</th><th scope="col" class="num">cu 1.10, slimium 0.3.1</th><th scope="col" class="num">cu 1.12, slimium 0.3.2</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">CPU del navegador</th><td class="num">458 s</td><td class="num strong">27,5 s</td></tr>
+            <tr><th scope="row">CPU en las pausas</th><td class="num">203 %</td><td class="num strong">5 %</td></tr>
+            <tr><th scope="row">Tiempo en comandos</th><td class="num">6,4 s</td><td class="num strong">3,3 s</td></tr>
+            <tr><th scope="row">Memoria, pico</th><td class="num">1009 MB</td><td class="num strong">475 MB</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="container block" id="coste">
+      <h2>Para agentes, no para tu día a día</h2>
+      <ul class="costs">
+        <li>Un solo renderer, sin aislamiento de sitios: para sitios propios o de prueba.</li>
+        <li>La primera acción tras devolver memoria paga entre 30 y 110 ms, una vez.</li>
+        <li>Cada navegador lleva su copia del motor, un reflink en btrfs o xfs.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="container foot">
+    <p class="mark">slimium</p>
+    <p>Hecho para <a href="https://github.com/jaivial/cu">cu</a>. Método y números en
+      <a href="https://github.com/jaivial/slimium/blob/main/docs/BENCHMARKS.md">BENCHMARKS</a> y
+      <a href="https://github.com/jaivial/slimium/blob/main/docs/GOVERNOR.md">GOVERNOR</a>.</p>
+  </footer>
+</body>
+</html>

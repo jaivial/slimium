@@ -3,6 +3,10 @@
 A Chromium-based browser for AI agents, written in C: the Chromium engine under a low-memory
 process model, with every operation available from the command line, built to be cu's browser.
 
+**13 tabs through cu: 225 MB, where Chromium takes 532** (steady footprint, median). Landing page:
+[`site/`](site/index.html), served at <https://jaivial.github.io/slimium/> once the repository is
+public ([`.github/workflows/pages.yml`](.github/workflows/pages.yml) deploys it from then on).
+
 - **Half the RAM or less.** Same Chromium 156 engine, low-memory process model ([docs/PROFILE.md](docs/PROFILE.md)) plus a
   tiny memory governor ([docs/GOVERNOR.md](docs/GOVERNOR.md)): idle GC + memory-pressure and cgroup proactive reclaim of
   the engine's file pages (private reflinked engine copy, own systemd scope, pid preserved).
@@ -37,6 +41,25 @@ Profile `balanced` (default). `max` adds V8 lite mode and PartitionAlloc hardeni
 Numbers and method: [docs/BENCHMARKS.md](docs/BENCHMARKS.md), [docs/GOVERNOR.md](docs/GOVERNOR.md), [docs/CU.md](docs/CU.md).
 Trade-offs: the first action after a reclaim pays +30-110 ms once; private engine copies (reflinks on btrfs);
 a single renderer process (no site isolation) — use it for agent work, not as a hardened daily browser.
+
+## With cu
+
+slimium is the browser of `cu-slim`: cu with `CU_BROWSER=slimium-chrome`, in a daemon of its own
+beside the user's cu ([tests/cu/cu-slim](tests/cu/cu-slim), installed by `tests/cu/install.sh`).
+`cu status --detail` then answers `"engine":"slimium"`. Measured on one QA flow (38 commands over
+three development apps, 8 s apart, headless, software rendering):
+
+| | cu 1.10 + slimium 0.3.1 | cu 1.12 + slimium 0.3.2 |
+| --- | ---: | ---: |
+| browser CPU for the flow | 458 s | 27.5 s |
+| browser CPU while the agent is quiet | 203 % of a core | 5 % |
+| time spent in cu commands | 6.4 s | 3.3 s |
+| anonymous memory, mean / peak | 521 / 1009 MB | 387 / 475 MB |
+
+On slimium's side of that: `cu-slim` keeps Chromium's frame-rate limit, and the 0.3.2 governor
+collects once the browser is quiet for 30 s or has grown, not between an agent's commands
+([docs/GOVERNOR.md](docs/GOVERNOR.md), round 3). cu's side is in its
+[README](https://github.com/jaivial/cu#cu-on-slimium).
 
 See AGENTS.md for the rules and layout.
 
