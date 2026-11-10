@@ -1,0 +1,47 @@
+name: Deploy the landing page to GitHub Pages
+
+# The landing page is static (site/: HTML and CSS, no build step).
+# GitHub Pages needs a public repository on this plan, so both jobs are
+# skipped while the repository is private; once it is public, a push that
+# touches site/ (or a manual run) publishes it at https://jaivial.github.io/slimium/.
+# Pages must be enabled once with "GitHub Actions" as the source.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    if: ${{ !github.event.repository.private }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
