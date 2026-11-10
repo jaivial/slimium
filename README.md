@@ -4,8 +4,8 @@ A Chromium-based browser for AI agents, written in C: the Chromium engine under 
 process model, with every operation available from the command line, built to be cu's browser.
 
 **13 tabs through cu: 225 MB, where Chromium takes 532** (steady footprint, median). Landing page:
-[`site/`](site/index.html), served at <https://jaivial.github.io/slimium/> once the repository is
-public ([`.github/workflows/pages.yml`](.github/workflows/pages.yml) deploys it from then on).
+<https://jaivial.github.io/slimium/> (source in [`site/`](site/index.html), deployed by
+[`.github/workflows/pages.yml`](.github/workflows/pages.yml)).
 
 - **Half the RAM or less.** Same Chromium 156 engine, low-memory process model ([docs/PROFILE.md](docs/PROFILE.md)) plus a
   tiny memory governor ([docs/GOVERNOR.md](docs/GOVERNOR.md)): idle GC + memory-pressure and cgroup proactive reclaim of
