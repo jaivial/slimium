@@ -72,23 +72,48 @@ Nothing is written to stdout or stderr. With `SLIM_GOV=0` the wrapper is exactly
   started within 1 s). Each tick reads only `/proc/PID/stat` of the known pids.
 - **Idle** = tree CPU < `SLIM_GOV_IDLE_CPU` (5 % of one core) for `SLIM_GOV_IDLE_MS` (5000).
   CPU spent above the threshold accumulates as "busy". Only real activity (>= `SLIM_GOV_BUSY_MS`
-  = 1000 ms of tree CPU, e.g. a cu action) re-arms the GC pass and an early reclaim. Chromium's
-  own idle blips (timers, refaults after a reclaim: 6-13 % for a second) do not, which otherwise
-  caused a full GC pass every 30 s. A 2-3 s grace period after each of our passes ignores the CPU
-  they cause.
-- **(a) Pressure + GC, once per idle period after real activity**:
+  = 1000 ms of tree CPU, e.g. a cu action) re-arms the GC pass. Chromium's own idle blips
+  (timers, refaults after a reclaim: 6-13 % for a second) do not, which otherwise caused a full
+  GC pass every 30 s. A 2-3 s grace period after each of our passes ignores the CPU they cause.
+- **Quiet** (since 0.3.2) = `SLIM_GOV_QUIET_S` (30) seconds since the last *real activity*: a
+  stretch above the idle threshold that adds up to 500 ms of CPU. Measured, an idle browser with
+  three parked tabs that poll makes stretches of 50-290 ms; a navigation, a scroll or a capture
+  with what follows it, 500 ms and more. The GC pass and the reclaim wait for quiet, not just
+  for idle. Until 0.3.1 they ran 5 s into every idle period, which between an agent's commands
+  is every few seconds: on a cu flow of 38 commands 8 s apart that was 46.2 CPU-seconds of
+  browser and 5.7 s of commands, against 34.1 and 3.9 with the quiet wait, for 386 MB of
+  anonymous memory instead of 416 (the pass costs a full GC of every tab, and the command after
+  a reclaim pays for the code that faults back in). `SLIM_GOV_QUIET_S=0` is the old timing.
+- **(a) Pressure + GC, once per quiet period after real activity**:
   `Memory.simulatePressureNotification {"level":"critical"}` on the browser target, then for every
   page target: attach (flatten), the same pressure notification, `HeapProfiler.collectGarbage`,
   detach. **Never `Memory.forciblyPurgeJavaScriptMemory`**: it destroys the page's V8 contexts.
   The DevTools connection is opened per pass and closed afterwards (kept open only with
   hibernation).
-- **(b) Reclaim, while idle**: on a later tick than the GC pass (after the grace period), then every
+  **Growth does not wait** (since 0.3.2). The governor follows the tree's anonymous memory (sum
+  of `RssAnon`) against its level right after the last GC pass (or the lowest seen since):
+  - grown by `SLIM_GOV_GC_GROW_MB` (256) and idle: a GC pass at once, without the quiet wait and
+    without a reclaim (event `grown-gc`);
+  - grown by `SLIM_GOV_BUSY_GROW_MB` (1024) and **not idle**: a GC pass anyway, at most every
+    10 s (event `busy-gc`). A browser that is never idle (a page animating in front, a run of
+    navigations) was never collected at all: 90 s of navigations of a development build, one a
+    second, took the renderer from 0.4 to 3.2 GB (scope peak 3949 MB) with no pass; with this,
+    four passes, the renderer between 0.5 and 1.1 GB, peak 1959 MB, and no fewer navigations.
+  `0` turns either off.
+- **(b) Reclaim, once quiet**: on a later tick than the GC pass (after the grace period), then every
   `SLIM_GOV_RECLAIM_S` (30 s). It runs **sooner** once the mapped file pages (`memory.stat
   file_mapped`) of the cgroups reclaimed last time grew by `SLIM_GOV_RECLAIM_GROW_MB` (24),
   but never more often than every `SLIM_GOV_RECLAIM_MIN_S` (5 s). The trigger deliberately does
   not watch `file`: most of what comes back after a reclaim is readahead around refaults, which
   is charged but unmapped. A first version that watched `file` reclaimed every 5 s (88 reclaims
   in 4 min) for about the same iso.
+  **Back-off** (since 0.3.2): a reclaim that no real activity called for doubles both waits for
+  the next one, up to `SLIM_GOV_RECLAIM_BACK_MAX` (64) times; real activity resets it. Evicting
+  the engine's code pays when it stays out. A browser with a tab that polls touches it again at
+  once and it is read back from disk: three parked tabs of that kind, 90 s, nobody using the
+  browser, cost 1666 MB of disk reads and 1280 major faults to hold 180 MB of page cache instead
+  of 490 MB. With the back-off: 682 MB in the first 90 s, 1183 MB over 5 minutes with no reclaim
+  at all in the last windows, the file pages settling at about 275 MB. `1` is no back-off.
   Per cgroup of the tree (`/proc/PID/cgroup`, v2 `0::` line, never `/`):
   1. **foreign check**: every pid in `cgroup.procs` of the cgroup *and of every descendant
      cgroup* (memory.reclaim acts on the whole subtree) must be in the governed tree. If not:
@@ -120,6 +145,7 @@ Nothing is written to stdout or stderr. With `SLIM_GOV=0` the wrapper is exactly
   logs it as `restore ... "by":"client"`.
 
 Events are written as JSON lines to `SLIM_GOV_LOG` (start, idle, active, pass, reclaim, grown,
+grown-gc, busy-gc,
 skip-foreign, skip-no-reclaim, hibernate, restore, no-cdp, exit). `SLIM_GOV_MEASURE=1` adds iso
 before/after each pass (two pagemap scans of the tree, ~50-100 ms; off by default).
 
@@ -136,7 +162,10 @@ Foreground mode prints the events (text, or JSON with `--json`) until the browse
 
 ## Tests
 
-`tests/gov.sh` (in `make test`, also `make test-gov`; CDP 9440-9442, temp profiles/state): 52 checks.
+`tests/gov.sh` (in `make test`, also `make test-gov`; CDP 9440-9442, temp profiles/state): 58 checks.
+When a pass runs: idle but not quiet and nothing grown, none; grown by more than
+`SLIM_GOV_GC_GROW_MB` and idle, a `grown-gc` pass and no reclaim; grown and kept busy by a page
+that spins, a `busy-gc` pass with no idle period in between.
 Session start spawns a detached governor (not a child of the browser; command line without
 `--remote-debugging-port`), status/mem show iso and the governor pid, and the zygotes run in
 `slimium-PID-*.scope`. A concurrent second browser (the wrapper) gets a different engine copy. A
@@ -155,6 +184,30 @@ reclaim happens, nothing goes to stdout, and the governor exits with the engine.
 fingerprint (daemon/browser pids, listeners 8810-8834/9362-9386) is unchanged.
 
 cu suite through cu-slim with the governor live (`tests/cu/run.sh`): **71/71**.
+
+## Numbers, round 3 (2026-11-10): the 0.3.2 timing
+
+What the quiet wait, the growth triggers and the reclaim back-off change, each measured against
+the 0.3.1 timing (`SLIM_GOV_QUIET_S=0 SLIM_GOV_GC_GROW_MB=0 SLIM_GOV_BUSY_GROW_MB=0
+SLIM_GOV_RECLAIM_BACK_MAX=1`) on the same binary, one run each unless said.
+
+| | 0.3.1 timing | 0.3.2 timing |
+|---|---|---|
+| `tests/cu/gov-ram.sh` (slim, 13-tab flow): steady median / min, iso MB | 224.4 / 213.4 | 228.2 / 217.6 |
+| same: time-weighted mean over the 150 s; 30 s after the active pass | 232.9; 258.2 | 286.2; 415.6 |
+| same: GC passes / reclaims in the run | 2 / 8 | 1 / 4 |
+| cu flow, 38 commands over three apps 8 s apart: browser CPU; time in commands | 46.2 s; 5.7 s | 34.1 s; 3.9 s |
+| same: anonymous memory, mean / max MB | 386 / 502 | 416 / 527 |
+| 90 s of navigations, one a second: renderer high-water; scope peak | 3.2 GB; 3949 MB | 1.1 GB; 1959 MB |
+| unused browser, three parked tabs that poll, 90 s: disk reads; major faults | 1666 MB; 1280 | 682 MB; 636 |
+| same, 5 minutes (0.3.2 only): disk reads; file pages at the end | | 1183 MB; ~275 MB (490 MB with no reclaim) |
+
+The steady footprint is the same. What is given up is how soon it is reached: the first pass
+comes 30 s after the last real activity instead of 5 s into every pause, so a reading taken
+less than 30 s after a burst is the working set, not the cleaned one. What is gained is that
+an agent's pauses no longer cost a full GC and cold code each, that a browser which is never
+idle is collected at all, and that an unused browser stops reading its own code back from
+disk.
 
 ## Numbers, round 2 (2026-11-05/06): all engine files + system libraries copied, lite-mode in max only
 

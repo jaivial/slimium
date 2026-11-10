@@ -30,6 +30,12 @@
 #define CHUNK_KB (64L * 1024)  /* memory.reclaim request size; activity is checked between chunks */
 #define SCAN_MS 5000      /* full /proc rescan of the tree */
 #define GRACE_MS 3000     /* CPU samples right after our own pass are not "activity" */
+#define BUSY_GC_MIN_MS 10000   /* a GC pass forced by growth while busy: not more often than this */
+/* CPU time (ms) in one stretch above idle_cpu that makes it somebody using the browser, not the
+ * browser's own doing. Measured: an idle browser with three parked tabs that poll makes
+ * stretches of 50-290 ms; a navigation, a scroll or a capture with what follows it, 500 ms and
+ * more. (A snapshot or a text read is a few ms: a session of nothing else looks idle.) */
+#define REAL_MS 500
 #define CG_ROOT "/sys/fs/cgroup"
 
 typedef struct { pid_t pid; unsigned long long start, ticks; } pinfo;
@@ -202,6 +208,25 @@ static double sample_cpu(gov_t *g, long long *tprev) {
     *tprev = t;
     if (el <= 0) el = 1;
     return (double)d * 100.0 * 1000.0 / (double)g->hz / (double)el;
+}
+
+/* Anonymous memory of the tree (sum of RssAnon over its processes), in kB; -1 if none could be
+ * read. This is what a GC gives back (JS and Blink heaps), and it does not count the engine's
+ * code, which the reclaim deals with. Read from /proc/PID/status, not from the cgroup, so it is
+ * right in a shared cgroup too. */
+static long tree_anon_kb(gov_t *g) {
+    long s = 0;
+    int ok = 0;
+    for (int i = 0; i < g->n; i++) {
+        char p[48], b[4096];
+        snprintf(p, sizeof p, "/proc/%d/status", (int)g->set[i].pid);
+        if (rdb(p, b, sizeof b) <= 0) continue;
+        const char *k = strstr(b, "\nRssAnon:");
+        if (!k) continue;
+        s += strtol(k + 9, NULL, 10);
+        ok = 1;
+    }
+    return ok ? s : -1;
 }
 
 /* ---- events (SLIM_GOV_LOG: JSON lines; out_fd: text or JSON) ---- */
@@ -721,14 +746,33 @@ int slim_gov_run(slim_gov_cfg *cfg) {
     ev_t e; ev_new(g, &e, "start");
     ev_i(&e, "port", cfg->port); ev_i(&e, "idle_ms", cfg->idle_ms); ev_d(&e, "idle_cpu", cfg->idle_cpu);
     ev_i(&e, "reclaim_s", cfg->reclaim_s); ev_i(&e, "grow_mb", cfg->grow_mb); ev_i(&e, "min_s", cfg->min_s); ev_i(&e, "gc", cfg->gc); ev_i(&e, "hibernate", cfg->hibernate);
+    ev_i(&e, "quiet_s", cfg->quiet_s); ev_i(&e, "gc_grow_mb", cfg->gc_grow_mb); ev_i(&e, "busy_grow_mb", cfg->busy_grow_mb);
+    ev_i(&e, "back_max", cfg->back_max);
     { char c[512]; ev_s(&e, "cgroup", cg_of(cfg->root, c, sizeof c) ? NULL : c); }
     ev_end(g, &e);
-    /* busy_gc / busy_rec: CPU time (ms) the tree spent above idle_cpu since the last GC pass /
-     * reclaim. Chromium's own background blips (timers, refaults after a reclaim) stay below
-     * busy_ms, so they neither re-run the GC pass nor pull the next reclaim forward. */
-    long long tprev = now_ms(), idle_since = now_ms(), last_reclaim = 0, grace_until = 0;
-    double busy_gc = 1e9, busy_rec = 1e9;
+    /* busy_gc: CPU time (ms) the tree spent above idle_cpu since the last GC pass. Chromium's
+     * own background blips (timers, refaults after a reclaim) stay below busy_ms, so they do
+     * not re-run the GC pass. */
+    long long tprev = now_ms(), idle_since = now_ms(), last_reclaim = 0, grace_until = 0, last_gc = 0;
+    double busy_gc = 1e9;
     int idle = 0;
+    /* back: the reclaim's back-off. Evicting the engine's code pays when it stays out. A
+     * browser with a tab that polls touches it again at once, and it is read back from disk:
+     * 1666 MB of reads and 1280 major faults in 90 s of an idle browser with three such tabs,
+     * measured, to hold 180 MB of page cache instead of 490 MB (which the kernel drops for
+     * free when memory is short). So every reclaim that no real activity called for doubles
+     * the wait for the next one, up to back_max times; real activity resets it. */
+    int back = 1;
+    /* anon_base: the tree's anonymous memory right after the last GC pass (or the lowest seen
+     * since: a tab that closes lowers it). What has grown above it is what a pass could give back. */
+    long anon_base = -1;
+    const int can_gc = cfg->port >= 0 && cfg->gc;
+    /* quiet_since: when the last real activity ended. A stretch of CPU above idle_cpu is real
+     * once it adds up to REAL_MS (burst); Chromium's own blips (a timer, a poll of a hidden
+     * page) are not, and must not restart the quiet wait: measured, a 6 % blip after 25 s of
+     * idleness kept a browser that nobody was using from ever being collected. */
+    long long quiet_since = now_ms();
+    double burst = 0;
     scan_tree(g);
     sample_cpu(g, &tprev);
     while (!g_stop) {
@@ -740,28 +784,59 @@ int slim_gov_run(slim_gov_cfg *cfg) {
         double cpu = sample_cpu(g, &tprev);
         restore_check(g, 0);
         if (t < grace_until) continue;
+        long anon = can_gc ? tree_anon_kb(g) : -1;
+        if (anon >= 0 && (anon_base < 0 || anon < anon_base)) anon_base = anon;
+        long grew = anon >= 0 ? anon - anon_base : 0;
         if (cpu >= cfg->idle_cpu) {
             double ms = cpu / 100.0 * (double)(t - t0);
-            busy_gc += ms; busy_rec += ms;
+            busy_gc += ms;
+            burst += ms;
+            if (burst >= REAL_MS) { quiet_since = t; back = 1; }
             if (idle) { ev_new(g, &e, "active"); ev_d(&e, "cpu", cpu); ev_end(g, &e); }
             idle_since = t; idle = 0;
+            /* A browser that is never idle (a page animating in front, a run of navigations)
+             * was never collected, however much it grew: 0.4 -> 4.8 GB in 90 s of navigations,
+             * measured. Past busy_grow_mb it is collected anyway (GC only: its code is hot). */
+            if (can_gc && cfg->busy_grow_mb > 0 && grew >= (long)cfg->busy_grow_mb * 1024 &&
+                t - last_gc >= BUSY_GC_MIN_MS) {
+                slim_gov_pass r;
+                do_pass(g, &r, 1, 0, 0, 0);
+                ev_new(g, &e, "busy-gc"); ev_kb(&e, "anon_growth", grew); ev_end(g, &e);
+                busy_gc = 0; last_gc = now_ms();
+                anon_base = tree_anon_kb(g);
+                grace_until = now_ms() + 2000;
+            }
             continue;
         }
         if (t - idle_since < cfg->idle_ms) continue;
+        burst = 0;
         if (!idle) { idle = 1; ev_new(g, &e, "idle"); ev_d(&e, "cpu", cpu); ev_i(&e, "busy_ms", (long long)(busy_gc < 1e8 ? busy_gc : -1)); ev_end(g, &e); }
-        int gc = busy_gc >= cfg->busy_ms && cfg->port >= 0 && (cfg->gc || cfg->hibernate > 0);
+        /* A pass costs CPU (a full GC of every tab) and the next command pays for the reclaim
+         * (its code faults back in). Between an agent's commands the browser is idle for a few
+         * seconds at a time: a pass after each burst cost 37 % more CPU and 50 % more command
+         * time for 11 % less memory (38 commands 8 s apart, measured). So both wait until
+         * quiet_s have passed since the last real activity, unless memory has grown enough to
+         * be worth collecting now. */
+        int quiet = t - quiet_since >= (long long)cfg->quiet_s * 1000;
+        int grown_gc = can_gc && cfg->gc_grow_mb > 0 && grew >= (long)cfg->gc_grow_mb * 1024;
+        int gc = busy_gc >= cfg->busy_ms && cfg->port >= 0 && (cfg->gc || cfg->hibernate > 0) && (quiet || grown_gc);
         /* reclaim on a later tick than the GC pass, once its CPU has settled (grace) */
-        int rec = !gc && cfg->reclaim_s > 0 && !g->reclaim_off &&
-                  (busy_rec >= cfg->busy_ms || t - last_reclaim >= (long long)cfg->reclaim_s * 1000);
+        int called_for = !last_reclaim || quiet_since > last_reclaim;   /* real activity since the last one */
+        int rec = !gc && quiet && cfg->reclaim_s > 0 && !g->reclaim_off &&
+                  (called_for || t - last_reclaim >= (long long)cfg->reclaim_s * 1000 * back);
         long grown = -1;
-        if (!gc && !rec && cfg->reclaim_s > 0 && !g->reclaim_off && cfg->grow_mb > 0 &&
-            t - last_reclaim >= (long long)cfg->min_s * 1000 && (grown = file_growth(g)) >= (long)cfg->grow_mb * 1024)
+        if (!gc && !rec && quiet && cfg->reclaim_s > 0 && !g->reclaim_off && cfg->grow_mb > 0 &&
+            t - last_reclaim >= (long long)cfg->min_s * 1000 * back && (grown = file_growth(g)) >= (long)cfg->grow_mb * 1024)
             rec = 2;   /* adaptive: the page cache came back */
         if (!gc && !rec) continue;
         slim_gov_pass r;
-        do_pass(g, &r, gc, gc, rec, 0);
-        if (gc) busy_gc = 0;
-        if (rec) { busy_rec = 0; last_reclaim = now_ms(); record_libs(g); }
+        do_pass(g, &r, gc, gc && quiet, rec, 0);
+        if (gc && !quiet) { ev_new(g, &e, "grown-gc"); ev_kb(&e, "anon_growth", grew); ev_end(g, &e); }
+        if (gc) { busy_gc = 0; last_gc = now_ms(); anon_base = tree_anon_kb(g); }
+        if (rec) {
+            last_reclaim = now_ms(); record_libs(g);
+            if (!called_for && back * 2 <= cfg->back_max) back *= 2;
+        }
         if (rec == 2) { ev_new(g, &e, "grown"); ev_kb(&e, "file_growth", grown); ev_end(g, &e); }
         grace_until = now_ms() + (gc ? 2000 : GRACE_MS);
     }
@@ -791,6 +866,10 @@ void slim_gov_defaults(slim_gov_cfg *g) {
     g->hibernate = (int)envl("SLIM_GOV_HIBERNATE", 0, 0, 1000);
     g->hib_min_s = (int)envl("SLIM_GOV_HIBERNATE_MIN_S", 120, 0, 86400 * 30);
     g->busy_ms = (int)envl("SLIM_GOV_BUSY_MS", 1000, 0, 86400000);
+    g->quiet_s = (int)envl("SLIM_GOV_QUIET_S", 30, 0, 86400);
+    g->gc_grow_mb = (int)envl("SLIM_GOV_GC_GROW_MB", 256, 0, 1 << 20);
+    g->busy_grow_mb = (int)envl("SLIM_GOV_BUSY_GROW_MB", 1024, 0, 1 << 20);
+    g->back_max = (int)envl("SLIM_GOV_RECLAIM_BACK_MAX", 64, 1, 4096);
     g->grow_mb = (int)envl("SLIM_GOV_RECLAIM_GROW_MB", 24, 0, 1 << 20);
     g->min_s = (int)envl("SLIM_GOV_RECLAIM_MIN_S", 5, 0, 86400);
     g->idle_cpu = 5;

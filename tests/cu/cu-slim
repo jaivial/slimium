@@ -5,7 +5,8 @@
 #
 # Overrides (all optional): CU_SLIM_HOME (daemon dir), CU_SLIM_PORT (HTTP),
 # CU_SLIM_CDP_PORT (DevTools), CU_SLIM_BROWSER (browser executable),
-# CU_SLIM_MODE (fast|compat), SLIM_PROFILE (off|balanced|max).
+# CU_SLIM_MODE (fast|compat), SLIM_PROFILE (off|balanced|max),
+# CU_FAST_CAPTURE (0|1, default 0: keep Chromium's frame-rate limit).
 home=${CU_SLIM_HOME:-$HOME/.local/share/cu-slim}
 if [ -n "${CU_SLIM_BROWSER:-}" ]; then
   browser=$CU_SLIM_BROWSER
@@ -23,5 +24,13 @@ export CU_CDP_PORT="${CU_SLIM_CDP_PORT:-9390}"
 export CU_BROWSER="$browser"
 export CU_MODE="${CU_SLIM_MODE:-fast}"
 export CU_HEADLESS=1
+# Keep Chromium's frame-rate limit (cu's fast mode drops it by default).
+# Without the limit a page with a looping CSS animation or a requestAnimationFrame
+# loop is drawn 250-2800 times a second in software: 2-2.7 cores per visible tab
+# for as long as the tab stays open, and the memory governor never sees the
+# browser idle. With the limit the same page is 60 fps and 16-18 % of one core.
+# Measured 2026-11-10 on the SAGE DEV apps. CU_FAST_CAPTURE=1 restores the
+# unlimited rate (a capture is then ~30 ms faster).
+export CU_FAST_CAPTURE="${CU_FAST_CAPTURE:-0}"
 export SLIM_PROFILE="${SLIM_PROFILE:-balanced}"
 exec "$HOME/.local/bin/cu-slim-bin" "$@"
