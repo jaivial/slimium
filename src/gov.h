@@ -25,6 +25,16 @@ typedef struct {
     int gc;                        /* SLIM_GOV_GC (1): pressure + GC pass */
     int hibernate;                 /* SLIM_GOV_HIBERNATE (0 = off): keep K most recent tabs */
     int hib_min_s;                 /* SLIM_GOV_HIBERNATE_MIN_S (120): untouched at least this long */
+    int quiet_s;                   /* SLIM_GOV_QUIET_S (30): a GC pass and a reclaim wait for the browser to
+                                    * have been idle this long, so they do not run between an agent's commands;
+                                    * 0 = as soon as it is idle (idle_ms) */
+    int gc_grow_mb;                /* SLIM_GOV_GC_GROW_MB (256): anonymous memory grown since the last GC pass
+                                    * that makes one run at the first idle moment, without the quiet wait; 0 = off */
+    int busy_grow_mb;              /* SLIM_GOV_BUSY_GROW_MB (1024): ... that makes one run while the browser is
+                                    * busy (it may never be idle), at most every 10 s; 0 = off */
+    int back_max;                  /* SLIM_GOV_RECLAIM_BACK_MAX (64): a reclaim that no real activity called for
+                                    * doubles the wait for the next one, up to reclaim_s and min_s times this;
+                                    * 1 = no back-off */
     int busy_ms;                   /* SLIM_GOV_BUSY_MS (1000): tree CPU time above idle_cpu that counts as
                                       real activity (re-arms the GC pass and an early reclaim) */
     int wait_engine;               /* wrapper mode: root is still slimium/systemd-run until it execs */

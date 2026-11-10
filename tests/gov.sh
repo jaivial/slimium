@@ -15,7 +15,9 @@ NTABS=${SLIM_GOV_TEST_TABS:-50}
 [ -x "$BIN" ] || { echo "missing $BIN (run make)"; exit 1; }
 source tests/cu/lib.sh
 ST=$(mktemp -d /tmp/slim-gov-test.XXXXXX)
-export SLIM_STATE_DIR=$ST SLIM_GOV_LOG=$ST/gov.log SLIM_GOV_IDLE_MS=2000 SLIM_GOV_RECLAIM_S=8
+# Short timings, so the passes this script waits for come soon; the quiet wait and the growth
+# triggers have their own block below.
+export SLIM_STATE_DIR=$ST SLIM_GOV_LOG=$ST/gov.log SLIM_GOV_IDLE_MS=2000 SLIM_GOV_RECLAIM_S=8 SLIM_GOV_QUIET_S=3
 unset SLIM_GOV SLIM_SCOPE SLIM_GOV_HIBERNATE
 WPID= SPID= BG=
 cleanup() {
@@ -140,6 +142,36 @@ PC=$(echo "$out" | jget pid)
 ok lib-copies 'grep -q "/slimium/engines/[^ ]*/lib/lib" /proc/$PC/maps' "no private library copy mapped"
 ok lib-no-glibc '! grep -Eq "/slimium/engines/[^ ]*/lib/(libc\.so|ld-linux|libm\.so)" /proc/$PC/maps'
 ok lib-eval '[ "$("$BIN" --session gc eval "1+1")" = 2 ]'
+"$BIN" --session gc stop >/dev/null
+
+# ---- when a pass runs: the quiet wait, and growth with and without idle time ----
+# (a) idle, but not yet quiet and nothing grown: no pass (it used to run after every burst)
+out=$(SLIM_GOV_LOG=$ST/q.log SLIM_GOV_QUIET_S=3600 SLIM_GOV_GC_GROW_MB=0 SLIM_GOV_BUSY_GROW_MB=0 \
+    "$BIN" --session gc --json start --port "$PB" --user-data-dir "$ST/udd-q")
+"$BIN" --session gc open "file://$FX/long.html" >/dev/null
+ok quiet-idle 'wait_log "$ST/q.log" "\"ev\":\"idle\"" 20' "the browser never went idle"
+sleep 6
+ok quiet-no-pass '! grep -q "\"ev\":\"pass\"" "$ST/q.log"' "a pass ran before the quiet wait: $(grep -m1 '"ev":"pass"' "$ST/q.log")"
+"$BIN" --session gc stop >/dev/null
+# (b) idle and grown: collected at once, without the quiet wait, and without a reclaim
+out=$(SLIM_GOV_LOG=$ST/g.log SLIM_GOV_QUIET_S=3600 SLIM_GOV_GC_GROW_MB=20 SLIM_GOV_BUSY_GROW_MB=0 \
+    "$BIN" --session gc --json start --port "$PB" --user-data-dir "$ST/udd-g")
+"$BIN" --session gc open "file://$FX/long.html" >/dev/null
+sleep 4   # the base is the lowest anonymous memory seen: let the start-up settle first
+"$BIN" --session gc eval 'window.keep = Array.from({length: 4e6}, (_, i) => ({i})); keep.length' >/dev/null
+ok grown-gc 'wait_log "$ST/g.log" "\"ev\":\"grown-gc\"" 20' "no GC pass after 100+ MB of growth: $(tail -n 2 "$ST/g.log")"
+ok grown-gc-no-reclaim '! grep -q "\"ev\":\"reclaim\"" "$ST/g.log"' "a reclaim ran before the quiet wait"
+"$BIN" --session gc stop >/dev/null
+# (c) never idle and grown: collected anyway
+out=$(SLIM_GOV_LOG=$ST/b.log SLIM_GOV_QUIET_S=3600 SLIM_GOV_GC_GROW_MB=0 SLIM_GOV_BUSY_GROW_MB=20 \
+    "$BIN" --session gc --json start --port "$PB" --user-data-dir "$ST/udd-y")
+"$BIN" --session gc open "file://$FX/long.html" >/dev/null
+sleep 4
+"$BIN" --session gc eval 'setInterval(() => { const t = performance.now(); while (performance.now() - t < 40); }, 50); 1' >/dev/null
+sleep 2; nb=$(wc -l <"$ST/b.log")   # from here on the page keeps a core busy
+"$BIN" --session gc eval 'window.keep = Array.from({length: 4e6}, (_, i) => ({i})); keep.length' >/dev/null
+ok busy-gc 'wait_log "$ST/b.log" "\"ev\":\"busy-gc\"" 30' "no GC pass on a busy browser that grew: $(tail -n 2 "$ST/b.log")"
+ok busy-gc-while-busy '! tail -n +$((nb + 1)) "$ST/b.log" | grep -q "\"ev\":\"idle\""' "the browser went idle, so this did not test the busy path"
 "$BIN" --session gc stop >/dev/null
 
 # ---- unscoped launch (SLIM_SCOPE=0, --no-gov): the shared cgroup is never reclaimed ----

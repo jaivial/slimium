@@ -170,9 +170,11 @@ the low-memory profile merged into the given argv — a drop-in browser for cu: 
 
 By default `slimium-chrome` and `slimium start` keep the engine's pid but run it in its own systemd
 user scope (`systemd-run --user --scope`), from a private copy of the engine ELF (a reflink on
-btrfs/xfs). They also fork a detached `slimium gov` process. While the browser is idle (tree CPU
-< 5 % for 5 s) it sends critical memory pressure + GC once per idle period. Then it evicts the
-browser's cold file pages (mostly engine code) with cgroup v2 `memory.reclaim`
-(`swappiness=0`: file pages only, no swap). It does this every 30 s, or sooner once 24 MB came back,
-and only in cgroups whose processes all belong to the browser tree. Opt-in tab hibernation:
+btrfs/xfs). They also fork a detached `slimium gov` process. Once nobody has used the browser
+for 30 s (idle, tree CPU < 5 %, and no real activity) it sends critical memory pressure + GC.
+Then it evicts the browser's cold file pages (mostly engine code) with cgroup v2 `memory.reclaim`
+(`swappiness=0`: file pages only, no swap), again every 30 s or sooner once 24 MB came back,
+backing off while the pages keep coming back, and only in cgroups whose processes all belong to
+the browser tree. Memory that grows does not wait: 256 MB more since the last pass is collected
+at the first idle moment, 1 GB more even while the browser is busy. Opt-in tab hibernation:
 `SLIM_GOV_HIBERNATE=K`. Details, numbers and caveats: [docs/GOVERNOR.md](docs/GOVERNOR.md).
