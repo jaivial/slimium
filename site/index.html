@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>slimium: Chromium para agentes, con menos de la mitad de memoria</title>
   <meta name="description" content="slimium es un navegador para agentes de IA escrito en C: el motor de Chromium con un modelo de procesos de poca memoria, un gobernador de memoria y todo por la línea de comandos. Es el navegador de cu-slim.">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
+  <script>try { var m = localStorage.getItem('slimium-mode'); if (m === 'dark' || m === 'light') document.documentElement.dataset.mode = m; } catch (e) {}</script>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23f3f4f6'/%3E%3Crect x='7' y='9' width='18' height='3' fill='%23d94a2b'/%3E%3Crect x='7' y='15' width='11' height='3' fill='%231f2329'/%3E%3Crect x='7' y='21' width='14' height='3' fill='%231f2329'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./style.css">
 </head>
@@ -21,6 +22,7 @@
         <a href="#cli">Línea de comandos</a>
         <a href="#cu">Con cu</a>
       </nav>
+      <button class="mode" type="button" hidden>Modo oscuro</button>
     </div>
   </header>
 
@@ -131,5 +133,25 @@ slimium mcp</code></pre>
       <a href="https://github.com/jaivial/slimium/blob/main/docs/BENCHMARKS.md">BENCHMARKS</a> y
       <a href="https://github.com/jaivial/slimium/blob/main/docs/GOVERNOR.md">GOVERNOR</a>.</p>
   </footer>
+  <script>
+    (function () {
+      var root = document.documentElement, button = document.querySelector('.mode');
+      var dark = window.matchMedia('(prefers-color-scheme: dark)');
+      var current = function () { return root.dataset.mode || (dark.matches ? 'dark' : 'light'); };
+      var label = function () {
+        var isDark = current() === 'dark';
+        button.textContent = isDark ? 'Modo claro' : 'Modo oscuro';
+        button.setAttribute('aria-pressed', String(isDark));
+      };
+      button.hidden = false;
+      label();
+      button.addEventListener('click', function () {
+        root.dataset.mode = current() === 'dark' ? 'light' : 'dark';
+        try { localStorage.setItem('slimium-mode', root.dataset.mode); } catch (e) {}
+        label();
+      });
+      dark.addEventListener('change', label);
+    })();
+  </script>
 </body>
 </html>
