@@ -185,6 +185,30 @@ fingerprint (daemon/browser pids, listeners 8810-8834/9362-9386) is unchanged.
 
 cu suite through cu-slim with the governor live (`tests/cu/run.sh`): **71/71**.
 
+## Numbers, round 3 (2026-11-10): the 0.3.2 timing
+
+What the quiet wait, the growth triggers and the reclaim back-off change, each measured against
+the 0.3.1 timing (`SLIM_GOV_QUIET_S=0 SLIM_GOV_GC_GROW_MB=0 SLIM_GOV_BUSY_GROW_MB=0
+SLIM_GOV_RECLAIM_BACK_MAX=1`) on the same binary, one run each unless said.
+
+| | 0.3.1 timing | 0.3.2 timing |
+|---|---|---|
+| `tests/cu/gov-ram.sh` (slim, 13-tab flow): steady median / min, iso MB | 224.4 / 213.4 | 228.2 / 217.6 |
+| same: time-weighted mean over the 150 s; 30 s after the active pass | 232.9; 258.2 | 286.2; 415.6 |
+| same: GC passes / reclaims in the run | 2 / 8 | 1 / 4 |
+| cu flow, 38 commands over three apps 8 s apart: browser CPU; time in commands | 46.2 s; 5.7 s | 34.1 s; 3.9 s |
+| same: anonymous memory, mean / max MB | 386 / 502 | 416 / 527 |
+| 90 s of navigations, one a second: renderer high-water; scope peak | 3.2 GB; 3949 MB | 1.1 GB; 1959 MB |
+| unused browser, three parked tabs that poll, 90 s: disk reads; major faults | 1666 MB; 1280 | 682 MB; 636 |
+| same, 5 minutes (0.3.2 only): disk reads; file pages at the end | | 1183 MB; ~275 MB (490 MB with no reclaim) |
+
+The steady footprint is the same. What is given up is how soon it is reached: the first pass
+comes 30 s after the last real activity instead of 5 s into every pause, so a reading taken
+less than 30 s after a burst is the working set, not the cleaned one. What is gained is that
+an agent's pauses no longer cost a full GC and cold code each, that a browser which is never
+idle is collected at all, and that an unused browser stops reading its own code back from
+disk.
+
 ## Numbers, round 2 (2026-11-05/06): all engine files + system libraries copied, lite-mode in max only
 
 Same protocol as below (`tests/cu/gov-ram.sh`, cu-slim, 13-tab flow, 150 s steady of 5 s samples).
